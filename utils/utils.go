@@ -1,6 +1,11 @@
 package utils
 
-import "strings"
+import (
+	"strings"
+	"time"
+
+	"github.com/fatih/color"
+)
 
 // BlockPassword
 // block password in mongo_urls:
@@ -39,4 +44,9 @@ func BlockPassword(url, replace string) string {
 		}
 	}
 	return string(newUrl)
+}
+
+func PrintCost(start time.Time) {
+	print("Cost: ")
+	color.Green(time.Since(start).String())
 }

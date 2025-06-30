@@ -2,11 +2,17 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
 	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
 	"github.com/SisyphusSQ/mongo-overview-tool/utils"
+)
+
+const (
+	MongoUser = "MONGO_USER"
+	MongoPass = "MONGO_PASS"
 )
 
 type BaseCfg struct {
@@ -24,6 +30,14 @@ type BaseCfg struct {
 	BuildUri string
 }
 
+type StatsConfig struct {
+	BaseCfg
+
+	ShowAll    bool
+	Database   string
+	Collection string
+}
+
 var (
 	authFmt = "%s:%s@"
 	uriFmt  = "mongodb://%s%s:%d/%s"
@@ -37,8 +51,13 @@ func BasePreCheck(cfg *BaseCfg) error {
 			return fmt.Errorf("host and port must be set")
 		}
 
+		user := os.Getenv(MongoUser)
+		pass := os.Getenv(MongoPass)
+
 		if cfg.Username != "" && cfg.Password != "" {
 			cfg.Auth = fmt.Sprintf(authFmt, cfg.Username, cfg.Password)
+		} else if user != "" && pass != "" {
+			cfg.Auth = fmt.Sprintf(authFmt, user, pass)
 		} else {
 			cfg.Auth = ""
 		}
@@ -52,7 +71,7 @@ func BasePreCheck(cfg *BaseCfg) error {
 		if len(split) != 2 {
 			return fmt.Errorf("invalid MongoDB URI: %s", cfg.MongoUri)
 		}
-		cfg.Auth = split[0]
+		cfg.Auth = split[0] + "@"
 	}
 
 	cli, err := mongo.NewMongoConn(cfg.BuildUri)
@@ -69,5 +88,5 @@ func BasePreCheck(cfg *BaseCfg) error {
 }
 
 func (c *BaseCfg) ConcatUri(addr string) string {
-	return fmt.Sprintf("mongodb://%s@%s/%s", c.Auth, addr, c.AuthSource)
+	return fmt.Sprintf("mongodb://%s%s/%s", c.Auth, addr, c.AuthSource)
 }

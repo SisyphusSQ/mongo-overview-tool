@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -73,6 +74,25 @@ type IsMaster struct {
 		ProcessId primitive.ObjectID `json:"processId,omitempty" bson:"processId"`
 		Counter   int64              `json:"counter,omitempty" bson:"counter"`
 	}
+}
+
+type CollStats struct {
+	AvgObjSize     float64              `json:"avgObjSize" bson:"avgObjSize"`
+	Capped         bool                 `json:"capped" bson:"capped"`
+	Count          int64                `json:"count" bson:"count"`
+	IndexSize      map[string]int64     `json:"indexSize" bson:"indexSize"`
+	NIndexes       int                  `json:"nIndexes" bson:"nIndexes"`
+	Ns             string               `json:"ns" bson:"ns"`
+	Ok             int                  `json:"ok" bson:"ok"`
+	ScaleFactor    int                  `json:"scaleFactor" bson:"scaleFactor"`
+	Sharded        bool                 `json:"sharded" bson:"sharded"`
+	Shards         map[string]CollStats `json:"shards" bson:"shards"`
+	Size           int64                `json:"size" bson:"size"`
+	StorageSize    int64                `json:"storageSize" bson:"storageSize"`
+	TotalIndexSize int64                `json:"totalIndexSize" bson:"totalIndexSize"`
+	WiredTiger     bson.M               `json:"wiredTiger" bson:"wiredTiger"`
+
+	IndexBuilds bson.A `json:"indexBuilds,omitempty" bson:"indexBuilds"`
 }
 
 type ClusterTime struct {

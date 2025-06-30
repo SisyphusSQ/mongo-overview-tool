@@ -3,11 +3,15 @@ package service
 import (
 	"fmt"
 	"strings"
+	"sync"
 
+	"github.com/dustin/go-humanize"
 	"github.com/fatih/color"
 	"github.com/spf13/cast"
 
 	"github.com/SisyphusSQ/mongo-overview-tool/internal/model"
+	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
+	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
 	"github.com/SisyphusSQ/mongo-overview-tool/utils"
 )
 
@@ -16,10 +20,17 @@ var _ PrintSrv = (*PrintSrvImpl)(nil)
 type PrintSrv interface {
 	Ahead(uri string)
 	OverviewRepl(stats []*model.OverviewStats)
+
+	Database(db string, width int)
+	ShardDatabase(db string, width int)
+	PrintBlankLine()
+	CollStats(stats mongo.CollStats)
+	ShardCollStats(stats mongo.CollStats, showAll bool)
 }
 
 type PrintSrvImpl struct {
-	format string
+	lock  sync.Mutex
+	width int
 }
 
 func NewPrintSrv() PrintSrv {
@@ -100,4 +111,66 @@ func (p *PrintSrvImpl) OverviewRepl(stats []*model.OverviewStats) {
 			stat.Version,
 		)
 	}
+}
+
+func (p *PrintSrvImpl) ShardDatabase(db string, width int) {
+	p.width = width
+	fmt.Print("Database: ")
+	color.Green(db)
+
+	color.Cyan("%-*s%-12s%-15s%-15s%-15s\n", width, "ns", "isSharded", "documents", "avgObjSize", "storageSize")
+	fmt.Printf("%-*s%-12s%-15s%-15s%-15s\n", width, "--", "---------", "---------", "----------", "-----------")
+}
+
+func (p *PrintSrvImpl) Database(db string, width int) {
+	p.width = width
+	fmt.Print("Database: ")
+	color.Green(db)
+
+	color.Cyan("%-*s%-15s%-15s%-15s\n", width, "ns", "documents", "avgObjSize", "storageSize")
+	fmt.Printf("%-*s%-15s%-15s%-15s\n", width, "--", "---------", "----------", "-----------")
+}
+
+func (p *PrintSrvImpl) ShardCollStats(stats mongo.CollStats, showAll bool) {
+	if !showAll && stats.Sharded {
+		l.Logger.Debugf("coll[%s] is sharded and no need to print, skip...", stats.Ns)
+		return
+	}
+
+	var (
+		isSh    string
+		shWidth int
+	)
+
+	if stats.Sharded {
+		isSh = color.GreenString("true")
+		shWidth = len(isSh) + 8
+	} else {
+		isSh = color.RedString("false")
+		shWidth = len(isSh) + 7
+	}
+
+	fmt.Printf("%-*s%-*s%-15s%-15s%-15s\n",
+		p.width,
+		stats.Ns,
+		shWidth,
+		isSh,
+		cast.ToString(stats.Count),
+		strings.ReplaceAll(humanize.Bytes(uint64(stats.AvgObjSize)), " ", ""),
+		strings.ReplaceAll(humanize.Bytes(uint64(stats.StorageSize)), " ", ""),
+	)
+}
+
+func (p *PrintSrvImpl) CollStats(stats mongo.CollStats) {
+	fmt.Printf("%-*s%-15s%-15s%-15s\n",
+		p.width,
+		stats.Ns,
+		cast.ToString(stats.Count),
+		strings.ReplaceAll(humanize.Bytes(uint64(stats.AvgObjSize)), " ", ""),
+		strings.ReplaceAll(humanize.Bytes(uint64(stats.StorageSize)), " ", ""),
+	)
+}
+
+func (p *PrintSrvImpl) PrintBlankLine() {
+	fmt.Println()
 }

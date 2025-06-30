@@ -20,6 +20,8 @@ var rootCmd = &cobra.Command{
 func initAll() {
 	initVersion()
 	initOverview()
+	initCheckShard()
+	initCollStats()
 }
 
 func Execute() {

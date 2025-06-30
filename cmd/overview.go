@@ -3,13 +3,15 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"github.com/SisyphusSQ/mongo-overview-tool/internal/service"
-	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/SisyphusSQ/mongo-overview-tool/internal/config"
+	"github.com/SisyphusSQ/mongo-overview-tool/internal/service"
+	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
+	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
+	"github.com/SisyphusSQ/mongo-overview-tool/utils"
 	"github.com/SisyphusSQ/mongo-overview-tool/vars"
 )
 
@@ -21,8 +23,8 @@ var overviewCmd = &cobra.Command{
 	Long:    `Start mongodb overview tool`,
 	Example: fmt.Sprintf("%s overview --uri <mongodbUri>\n", vars.AppName),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var err error
-		if err = config.BasePreCheck(&overCfg); err != nil {
+		start := time.Now()
+		if err := config.BasePreCheck(&overCfg); err != nil {
 			return err
 		}
 
@@ -39,11 +41,12 @@ var overviewCmd = &cobra.Command{
 		}
 		defer ovSrv.Close()
 
-		err = ovSrv.GetOverview()
-		if err != nil {
+		if err = ovSrv.GetOverview(); err != nil {
 			l.Logger.Errorf("GetOverview failed, err: %v", err)
 			return err
 		}
+		utils.PrintCost(start)
+
 		return nil
 	},
 }
@@ -51,8 +54,8 @@ var overviewCmd = &cobra.Command{
 func initOverview() {
 	overviewCmd.Flags().BoolVar(&overCfg.Debug, "debug", false, "If debug_mode is true, print debug logs")
 
-	overviewCmd.Flags().StringVar(&overCfg.Host, "host", "127.0.0.1", "Server to connect to")
-	overviewCmd.Flags().IntVar(&overCfg.Port, "port", 27017, "Port to connect to")
+	overviewCmd.Flags().StringVarP(&overCfg.Host, "host", "t", "127.0.0.1", "Server to connect to")
+	overviewCmd.Flags().IntVarP(&overCfg.Port, "port", "P", 27017, "Port to connect to")
 	overviewCmd.Flags().StringVarP(&overCfg.Username, "username", "u", "", "Username for authentication")
 	overviewCmd.Flags().StringVarP(&overCfg.Password, "password", "p", "", "Password for authentication")
 	overviewCmd.Flags().StringVar(&overCfg.AuthSource, "authSource", "admin", "User source")
