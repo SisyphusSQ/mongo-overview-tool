@@ -17,8 +17,8 @@ var collCfg config.StatsConfig
 
 var collStatsCmd = &cobra.Command{
 	Use:     "coll-stats",
-	Short:   "Start mongodb overview tool",
-	Long:    `Start mongodb overview tool`,
+	Short:   "Check collection stats",
+	Long:    `Check collection stats`,
 	Example: fmt.Sprintf("%s coll-stats --uri <mongodbUri>\n", vars.AppName),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		start := time.Now()

@@ -19,8 +19,8 @@ var overCfg config.BaseCfg
 
 var overviewCmd = &cobra.Command{
 	Use:     "overview",
-	Short:   "Start mongodb overview tool",
-	Long:    `Start mongodb overview tool`,
+	Short:   "Get MongoDB replica or sharding cluster overview",
+	Long:    `Get MongoDB replica or sharding cluster overview`,
 	Example: fmt.Sprintf("%s overview --uri <mongodbUri>\n", vars.AppName),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		start := time.Now()

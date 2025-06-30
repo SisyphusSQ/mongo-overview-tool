@@ -19,8 +19,8 @@ var shCfg config.StatsConfig
 
 var shardCmd = &cobra.Command{
 	Use:     "check-shard",
-	Short:   "Start mongodb overview tool",
-	Long:    `Start mongodb overview tool`,
+	Short:   "Check whether collection is sharded or not",
+	Long:    `Check whether collection is sharded or not`,
 	Example: fmt.Sprintf("%s check-shard --uri <mongodbUri>\n", vars.AppName),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		start := time.Now()

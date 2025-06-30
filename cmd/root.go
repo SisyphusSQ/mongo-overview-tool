@@ -11,7 +11,7 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:  vars.AppName,
-	Long: fmt.Sprintf("%s easily get overviews from MongoDB", vars.AppName),
+	Long: fmt.Sprintf("%s easily get overviews from MongoDB cluster", vars.AppName),
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("Option missed! Use %s -h or --help for details.\n", vars.AppName)
 	},
