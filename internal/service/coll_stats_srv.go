@@ -140,10 +140,18 @@ func (c *CollStatsSrvImpl) Stats(isSh bool) error {
 		})
 
 		maxWidth += 2
+		dbStats, err := c.conn.DBStatus(c.ctx, db)
+		if err != nil {
+			l.Logger.Errorf("Failed to get DB status: %v", err)
+			return err
+		}
+		// sharding's dbStats hasn't db name, so we need to add it manually
+		dbStats.DB = db
+
 		if isSh {
-			c.printSrv.ShardDatabase(db, maxWidth)
+			c.printSrv.ShardDatabase(dbStats, maxWidth)
 		} else {
-			c.printSrv.Database(db, maxWidth)
+			c.printSrv.Database(dbStats, maxWidth)
 		}
 
 		for _, s := range collStats {

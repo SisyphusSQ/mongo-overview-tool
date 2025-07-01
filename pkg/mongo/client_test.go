@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"go.mongodb.org/mongo-driver/bson"
+
 	"github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
 )
 
@@ -112,4 +114,33 @@ func TestServerStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log(string(j))
+}
+
+func TestDBStatus(t *testing.T) {
+	cli, err := getClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cli.Close()
+
+	ctx := context.Background()
+	dbs, err := cli.Client.ListDatabaseNames(ctx, bson.M{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, db := range dbs {
+		t.Log("db:", db)
+		info, err := cli.DBStatus(ctx, db)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		j, err := json.MarshalIndent(info, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Log(string(j))
+		println()
+	}
 }

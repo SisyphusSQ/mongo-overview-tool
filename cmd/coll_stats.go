@@ -3,14 +3,16 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/spf13/cobra"
+
 	"github.com/SisyphusSQ/mongo-overview-tool/internal/config"
 	"github.com/SisyphusSQ/mongo-overview-tool/internal/service"
 	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
 	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
 	"github.com/SisyphusSQ/mongo-overview-tool/utils"
 	"github.com/SisyphusSQ/mongo-overview-tool/vars"
-	"github.com/spf13/cobra"
-	"time"
 )
 
 var collCfg config.StatsConfig

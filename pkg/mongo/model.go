@@ -76,6 +76,24 @@ type IsMaster struct {
 	}
 }
 
+type DBStats struct {
+	ClusterTime ClusterTime         `json:"$clusterTime" bson:"$clusterTime"`
+	Ok          int                 `json:"ok" bson:"ok"`
+	AvgObjSize  float64             `json:"avgObjSize" bson:"avgObjSize"`
+	Collections int                 `json:"collections" bson:"collections"`
+	DataSize    int64               `json:"dataSize" bson:"dataSize"`
+	DB          string              `json:"db" bson:"db"`
+	FsTotalSize int64               `json:"fsTotalSize" bson:"fsTotalSize"`
+	FsUsedSize  int64               `json:"fsUsedSize" bson:"fsUsedSize"`
+	Indexes     int                 `json:"indexes" bson:"indexes"`
+	NumExtents  int                 `json:"numExtents" bson:"numExtents"`
+	Objects     int                 `json:"objects" bson:"objects"`
+	OT          primitive.Timestamp `json:"operationTime" bson:"operationTime"`
+	ScaleFactor int                 `json:"scaleFactor" bson:"scaleFactor"`
+	StorageSize int64               `json:"storageSize" bson:"storageSize"`
+	Views       int                 `json:"views" bson:"views"`
+}
+
 type CollStats struct {
 	AvgObjSize     float64              `json:"avgObjSize" bson:"avgObjSize"`
 	Capped         bool                 `json:"capped" bson:"capped"`

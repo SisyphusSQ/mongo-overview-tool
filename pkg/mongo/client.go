@@ -3,6 +3,7 @@ package mongo
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -24,8 +25,9 @@ func NewMongoConn(uri string) (*Conn, error) {
 	// read pref
 	clientOps.SetReadPreference(readpref.Primary())
 
-	// create default context
-	ctx := context.Background()
+	// create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
 	// connect
 	client, err := mongo.NewClient(clientOps)
@@ -93,5 +95,10 @@ func (c *Conn) ListShards(ctx context.Context) (result ShStatus, err error) {
 
 func (c *Conn) ServerStatus(ctx context.Context) (result bson.M, err error) {
 	err = c.Client.Database("admin").RunCommand(ctx, bson.M{"serverStatus": 1}).Decode(&result)
+	return
+}
+
+func (c *Conn) DBStatus(ctx context.Context, db string) (result DBStats, err error) {
+	err = c.Client.Database(db).RunCommand(ctx, bson.M{"dbStats": 1}).Decode(&result)
 	return
 }

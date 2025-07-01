@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,6 +22,12 @@ var _ OverviewSrv = (*OverviewSrvImpl)(nil)
 type OverviewSrv interface {
 	GetOverview() error
 	Close()
+
+	handleRepl(conn *mongo.Conn) error
+	handleNode(repl, addr, stateStr string) (*model.OverviewStats, error)
+
+	printReplHosts() error
+	printShHosts(shards mongo.ShStatus)
 }
 
 type clusterType string
@@ -94,7 +101,13 @@ func (o *OverviewSrvImpl) GetOverview() error {
 	o.printSrv.Ahead(o.conn.URI)
 	switch o.clusterType {
 	case repl:
-		err := o.handleRepl(o.conn)
+		err := o.printReplHosts()
+		if err != nil {
+			l.Logger.Errorf("Failed to get replHosts: %v", err)
+			return err
+		}
+
+		err = o.handleRepl(o.conn)
 		if err != nil {
 			l.Logger.Errorf("Failed to get overview: %v", err)
 			return err
@@ -105,6 +118,7 @@ func (o *OverviewSrvImpl) GetOverview() error {
 			l.Logger.Errorf("Failed to list shards: %v", err)
 			return err
 		}
+		o.printShHosts(listShards)
 
 		for _, s := range listShards.Shards {
 			split := strings.Split(s.Host, "/")
@@ -177,7 +191,7 @@ func (o *OverviewSrvImpl) handleNode(repl, addr, stateStr string) (*model.Overvi
 	conn, err := mongo.NewMongoConn(o.cfg.ConcatUri(addr))
 	if err != nil {
 		l.Logger.Errorf("Failed to get conn: %v", err)
-		return nil, err
+		return s, nil
 	}
 	defer conn.Close()
 
@@ -253,6 +267,34 @@ func (o *OverviewSrvImpl) handleNode(repl, addr, stateStr string) (*model.Overvi
 	s.QW = cast.ToString(qw)
 
 	return s, nil
+}
+
+func (o *OverviewSrvImpl) printReplHosts() error {
+	hosts := make([]string, 0)
+	rsStatus, err := o.conn.RsStatus(o.ctx)
+	if err != nil {
+		return err
+	}
+	for _, m := range rsStatus.Members {
+		hosts = append(hosts, strings.Split(m.Name, ":")[0])
+	}
+	o.printSrv.Hosts(hosts)
+	return nil
+}
+
+func (o *OverviewSrvImpl) printShHosts(shards mongo.ShStatus) {
+	hosts := make([]string, 0)
+	for _, s := range shards.Shards {
+		split := strings.Split(s.Host, "/")
+		for _, hp := range strings.Split(split[1], ",") {
+			addr := strings.Split(hp, ":")[0]
+			if slices.Contains(hosts, addr) {
+				continue
+			}
+			hosts = append(hosts, addr)
+		}
+	}
+	o.printSrv.Hosts(hosts)
 }
 
 func (o *OverviewSrvImpl) Close() {

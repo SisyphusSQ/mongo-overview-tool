@@ -17,8 +17,9 @@ type OverviewStats struct {
 	Engine  string `json:"engine"`
 	Version string `json:"version"`
 
-	CacheUsed int64 `json:"cacheUsed"`
-	CacheSize int64 `json:"cacheSize"`
+	CacheUsed    int64  `json:"cacheUsed"`
+	CacheSize    int64  `json:"cacheSize"`
+	ColoredState string `json:"coloredState"`
 }
 
 func NewOverviewStats(repl, addr, stateStr string) *OverviewStats {
