@@ -1,6 +1,9 @@
 package utils
 
 import (
+	"errors"
+	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -49,4 +52,22 @@ func BlockPassword(url, replace string) string {
 func PrintCost(start time.Time) {
 	print("Cost: ")
 	color.Green(time.Since(start).String())
+}
+
+func IsMultiHosts(uri string) (bool, error) {
+	if !strings.HasPrefix(uri, "mongodb://") && !strings.HasPrefix(uri, "mongodb+srv://") {
+		return false, errors.New("uri format error")
+	}
+
+	u, err := url.Parse(uri)
+	if err != nil {
+		return false, fmt.Errorf("parse uri err: %v", err)
+	}
+
+	if strings.HasPrefix(uri, "mongodb+srv://") {
+		return true, nil
+	}
+
+	hosts := strings.Split(u.Host, ",")
+	return len(hosts) > 1, nil
 }

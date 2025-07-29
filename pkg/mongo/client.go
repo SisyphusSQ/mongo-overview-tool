@@ -8,6 +8,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 
 	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
 	"github.com/SisyphusSQ/mongo-overview-tool/utils"
@@ -20,10 +21,18 @@ type Conn struct {
 
 func NewMongoConn(uri string) (*Conn, error) {
 	clientOps := options.Client().ApplyURI(uri)
-	clientOps.SetDirect(true)
 
-	// read pref
-	//clientOps.SetReadPreference(readpref.Primary())
+	isMulti, err := utils.IsMultiHosts(uri)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isMulti {
+		clientOps.SetDirect(true)
+	} else {
+		// read pref
+		clientOps.SetReadPreference(readpref.Primary())
+	}
 
 	// create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
