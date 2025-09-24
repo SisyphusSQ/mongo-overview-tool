@@ -22,6 +22,7 @@ func initAll() {
 	initOverview()
 	initCheckShard()
 	initCollStats()
+	initSlowlogCmd()
 }
 
 func Execute() {

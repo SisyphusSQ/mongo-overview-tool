@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dustin/go-humanize"
 	"github.com/fatih/color"
@@ -14,20 +15,29 @@ import (
 	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
 	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
 	"github.com/SisyphusSQ/mongo-overview-tool/utils"
+	"github.com/SisyphusSQ/mongo-overview-tool/utils/timeutil"
 )
 
 var _ PrintSrv = (*PrintSrvImpl)(nil)
 
 type PrintSrv interface {
 	Ahead(uri string)
+	SingleHost(host string, state mongo.ReplicaState)
 	Hosts(hosts []string)
+	Repl(set string)
 	OverviewRepl(stats []*model.OverviewStats)
 
 	Database(db mongo.DBStats, width int)
 	ShardDatabase(db mongo.DBStats, width int)
-	PrintBlankLine()
 	CollStats(stats mongo.CollStats)
 	ShardCollStats(stats mongo.CollStats, showAll bool)
+
+	SlowOverView(logs []*mongo.SlowlogView)
+	SlowDetail(ns, indexes, slow string)
+
+	PrintBlankLine()
+	PrintDashedLine()
+	PrintHorizontalLine()
 }
 
 type PrintSrvImpl struct {
@@ -48,6 +58,14 @@ func (p *PrintSrvImpl) Hosts(hosts []string) {
 	for _, host := range hosts {
 		fmt.Printf("%s\n", color.GreenString(host))
 	}
+}
+
+func (p *PrintSrvImpl) SingleHost(host string, state mongo.ReplicaState) {
+	fmt.Printf("Host: %s, State: %s\n", color.GreenString(host), color.GreenString(state.String()))
+}
+
+func (p *PrintSrvImpl) Repl(set string) {
+	fmt.Println("\nReplSet: " + color.GreenString(set))
 }
 
 func (p *PrintSrvImpl) OverviewRepl(stats []*model.OverviewStats) {
@@ -202,4 +220,76 @@ func (p *PrintSrvImpl) CollStats(stats mongo.CollStats) {
 
 func (p *PrintSrvImpl) PrintBlankLine() {
 	fmt.Println()
+}
+
+func (p *PrintSrvImpl) PrintDashedLine() {
+	fmt.Println("====================================")
+}
+
+func (p *PrintSrvImpl) PrintHorizontalLine() {
+	fmt.Println("--------------")
+}
+
+func (p *PrintSrvImpl) SlowOverView(logs []*mongo.SlowlogView) {
+	var (
+		width      int
+		total      int64
+		start, end time.Time
+	)
+
+	for i, log := range logs {
+		if i == 0 {
+			start = log.MaxTs
+			end = log.MinTs
+		}
+
+		total += log.Cnt
+
+		if len(log.Ns)+2 > width {
+			width = len(log.Ns) + 2
+		}
+
+		if log.MaxTs.After(start) {
+			start = log.MaxTs
+		}
+		if log.MinTs.Before(end) {
+			end = log.MinTs
+		}
+	}
+
+	startTs := timeutil.FormatLayoutString(start)
+	endTs := timeutil.FormatLayoutString(end)
+
+	p.width = width
+	fmt.Printf("Database: %s\n", color.GreenString(logs[0].DB))
+	fmt.Printf("Total: %s TimeFrame: [%s]~[%s]\n\n", color.HiRedString("%d", total), color.GreenString(endTs), color.GreenString(startTs))
+
+	color.Cyan("%-*s%-12s%-10s%-6s%-10s%-10s%-10s%-22s%-22s\n", width, "ns", "queryHash", "op", "count", "maxMills", "minMills", "maxDocs", "firstTs", "lastTs")
+	fmt.Printf("%-*s%-12s%-10s%-6s%-10s%-10s%-10s%-22s%-22s\n", width, "--", "---------", "--", "-----", "--------", "--------", "-------", "-------", "------")
+
+	for _, log := range logs {
+		fmt.Printf("%-*s%-12s%-10s%-6s%-10d%-10d%-10d%-22s%-22s\n",
+			width,
+			log.Ns,
+			log.QueryHash,
+			log.Op,
+			cast.ToString(log.Cnt),
+			log.MaxMills,
+			log.MinMills,
+			log.MaxDocs,
+			timeutil.FormatLayoutString(log.MinTs),
+			timeutil.FormatLayoutString(log.MaxTs),
+		)
+	}
+	p.PrintBlankLine()
+}
+
+func (p *PrintSrvImpl) SlowDetail(ns, indexes, slow string) {
+	fmt.Printf("ns: %s, indexes detail info:\n", color.GreenString(ns))
+	fmt.Println("--------")
+	fmt.Println(indexes)
+	p.PrintBlankLine()
+	color.Green("slow detail info:")
+	fmt.Println("--------")
+	fmt.Println(slow)
 }

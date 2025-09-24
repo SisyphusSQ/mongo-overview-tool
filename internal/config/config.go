@@ -38,6 +38,16 @@ type StatsConfig struct {
 	Collection string
 }
 
+type SlowlogConfig struct {
+	BaseCfg
+
+	Overview  bool
+	Detail    bool
+	DB        string
+	Sort      string
+	QueryHash string
+}
+
 var (
 	authFmt = "%s:%s@"
 	uriFmt  = "mongodb://%s%s:%d/%s"
@@ -89,4 +99,8 @@ func BasePreCheck(cfg *BaseCfg) error {
 
 func (c *BaseCfg) ConcatUri(addr string) string {
 	return fmt.Sprintf("mongodb://%s%s/%s", c.Auth, addr, c.AuthSource)
+}
+
+func (c *BaseCfg) ConcatUriWithAuthDB(addr, db string) string {
+	return fmt.Sprintf("mongodb://%s%s/%s?authSource=%s", c.Auth, addr, db, c.AuthSource)
 }

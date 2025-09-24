@@ -22,6 +22,9 @@ linux:
 test:
 	go build -ldflags="${BUILD_FLAGS}" -o bin/${BINARY_NAME} main.go
 
+test_x86:
+	GOARCH=amd64 go build -ldflags="${BUILD_FLAGS}" -o bin/${BINARY_NAME} main.go
+
 darwin:
 	@mv bin/${BINARY_NAME} bin/${BINARY_NAME}.darwin.arm64
 

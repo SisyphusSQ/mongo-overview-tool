@@ -50,8 +50,8 @@ func BlockPassword(url, replace string) string {
 }
 
 func PrintCost(start time.Time) {
-	print("Cost: ")
-	color.Green(time.Since(start).String())
+	fmt.Printf("Cost: %s\n", color.GreenString(time.Since(start).String()))
+
 }
 
 func IsMultiHosts(uri string) (bool, error) {

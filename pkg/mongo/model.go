@@ -1,6 +1,7 @@
 package mongo
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 type RsStatus struct {
 	ClusterTime                ClusterTime         `json:"$clusterTime" bson:"$clusterTime"`
 	Ok                         int                 `json:"ok" bson:"ok"`
-	MyState                    int                 `json:"myState" bson:"myState"`
+	MyState                    ReplicaState        `json:"myState" bson:"myState"`
 	Date                       time.Time           `json:"date" bson:"date"`
 	OT                         primitive.Timestamp `json:"operationTime" bson:"operationTime"`
 	Optimes                    Optimes             `json:"optimes" bson:"optimes"`
@@ -27,6 +28,49 @@ type RsStatus struct {
 	VotingMembersCount         int                 `json:"votingMembersCount"`
 	WritableVotingMembersCount int                 `json:"writableVotingMembersCount"`
 	WriteMajorityCount         int                 `json:"writeMajorityCount"`
+}
+
+type ReplicaState int
+
+const (
+	StateStartup    ReplicaState = iota // 0: 启动中，尚未加入副本集
+	StatePrimary                        // 1: 主节点，负责所有写操作
+	StateSecondary                      // 2: 从节点，复制主节点数据，提供读操作
+	StateRecovering                     // 3: 恢复中，通常是刚启动或正在同步大量数据
+	StateStartup2                       // 4: 启动2阶段，用于版本兼容
+	StateUnknown                        // 5: 未知状态
+	StateArbiter                        // 6: 仲裁节点，不存储数据，只参与选举
+	StateDown                           // 7: 节点不可用
+	StateRollback                       // 8: 回滚中，正在撤销不符合主节点的操作
+	StateShun                           // 9: 节点被排斥，不参与副本集操作
+)
+
+// String 方法实现，返回状态的描述信息
+func (s ReplicaState) String() string {
+	switch s {
+	case StateStartup:
+		return "Startup (0) - 节点启动中，尚未加入副本集"
+	case StatePrimary:
+		return "Primary (1) - 主节点，处理所有写操作"
+	case StateSecondary:
+		return "Secondary (2) - 从节点，复制主节点数据，可处理读操作"
+	case StateRecovering:
+		return "Recovering (3) - 恢复中，可能正在同步数据"
+	case StateStartup2:
+		return "Startup2 (4) - 启动第二阶段，用于版本兼容性"
+	case StateUnknown:
+		return "Unknown (5) - 未知状态"
+	case StateArbiter:
+		return "Arbiter (6) - 仲裁节点，仅参与选举，不存储数据"
+	case StateDown:
+		return "Down (7) - 节点不可用"
+	case StateRollback:
+		return "Rollback (8) - 正在执行回滚操作"
+	case StateShun:
+		return "Shun (9) - 节点被排斥，不参与副本集活动"
+	default:
+		return fmt.Sprintf("Unknown state (%d) - 未定义的副本集状态", s)
+	}
 }
 
 type ShStatus struct {
@@ -152,7 +196,7 @@ type RsMember struct {
 	Optime               Optime              `json:"optime" bson:"optime"`
 	OptimeDate           time.Time           `json:"optimeDate" bson:"optimeDate"`
 	Self                 bool                `json:"self" bson:"self"`
-	State                int                 `json:"state" bson:"state"`
+	State                ReplicaState        `json:"state" bson:"state"`
 	StateStr             string              `json:"stateStr" bson:"stateStr"`
 	SyncSourceHost       string              `json:"syncSourceHost" bson:"syncSourceHost"`
 	SyncSourceId         int                 `json:"syncSourceId" bson:"syncSourceId"`
@@ -186,4 +230,18 @@ type ElMetrics struct {
 type Optime struct {
 	T  int                 `json:"t" bson:"t"`
 	Ts primitive.Timestamp `json:"ts" bson:"ts"`
+}
+
+type SlowlogView struct {
+	Ns        string    `json:"ns" bson:"ns"`
+	Op        string    `json:"op" bson:"op"`
+	QueryHash string    `json:"queryHash" bson:"queryHash"`
+	Cnt       int64     `json:"cnt" bson:"cnt"`
+	MaxMills  int64     `json:"maxMills" bson:"maxMills"`
+	MinMills  int64     `json:"minMills" bson:"minMills"`
+	MaxDocs   int64     `json:"maxDocs" bson:"maxDocs"`
+	MaxTs     time.Time `json:"maxTs" bson:"maxTs"`
+	MinTs     time.Time `json:"minTs" bson:"minTs"`
+
+	DB string `json:"-" bson:"-"`
 }
