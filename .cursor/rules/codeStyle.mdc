@@ -1,0 +1,65 @@
+---
+description: codeStyle - 方法前必须用中文注释说明入参、出参及关键逻辑
+alwaysApply: true
+---
+
+# codeStyle 代码注释规范
+
+凡生成的代码，**在每个方法/函数前**必须添加**中文注释**，包含以下三部分：
+
+1. **入参**：说明每个参数的含义、类型约束或可选值（如有必要）。
+2. **出参**：说明返回值含义、可能为 nil 的情况或错误语义。
+3. **关键逻辑/注意点**：简要说明实现要点、边界条件、副作用或调用方需要注意的逻辑。
+
+## 示例（Go）
+
+```go
+// GetUserByID 根据用户 ID 查询用户信息。
+//
+// 入参:
+//   - ctx: 上下文，用于超时与取消
+//   - id: 用户 ID，必须为正数
+//
+// 出参:
+//   - *User: 用户信息，未找到时为 nil
+//   - error: 数据库错误或 id 非法时非 nil
+//
+// 注意: 内部会查主库，高并发场景注意缓存或限流。
+func GetUserByID(ctx context.Context, id int64) (*User, error) {
+	// ...
+}
+```
+
+## 要求
+
+- 注释紧贴方法定义上方，使用块注释（如 `// ...`）。
+- 入参、出参、关键逻辑缺一不可；若某方法无入参或无出参，可写「无」或「无特殊说明」。
+- 注释语言统一为**中文**。
+
+## 类型书写
+
+- 使用 **`any`** 代替 **`interface{}`**（含字段、参数、返回值、泛型约束等）。
+
+## import 分组
+
+- import 块统一按 **三段式** 排列，各段之间用 **一个空行** 分隔：
+
+  1. **标准库**（`fmt`、`context`、`time` 等）
+  2. **外部依赖**（`go.mongodb.org/…`、`golang.org/x/…`、`github.com/…` 等第三方包）
+  3. **项目内部包**（`github.com/SisyphusSQ/mongo-overview-tool/…`）
+
+```go
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/SisyphusSQ/mongo-overview-tool/internal/config"
+	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
+)
+```
+
+- 如果某一段为空（例如没有外部依赖），直接省略该段及其空行即可。

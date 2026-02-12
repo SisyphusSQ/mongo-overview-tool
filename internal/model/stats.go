@@ -11,7 +11,7 @@ type OverviewStats struct {
 	AW      string `json:"aw"`
 	Size    string `json:"size"`
 	MemUsed string `json:"memUsed"`
-	MenRes  string `json:"menRes"`
+	MemRes  string `json:"memRes"`
 	Delay   string `json:"delay"`
 	UpTime  string `json:"upTime"`
 	Engine  string `json:"engine"`
@@ -34,7 +34,7 @@ func NewOverviewStats(repl, addr, stateStr string) *OverviewStats {
 		AW:      "n/a",
 		Size:    "n/a",
 		MemUsed: "n/a",
-		MenRes:  "n/a",
+		MemRes:  "n/a",
 		Delay:   "n/a",
 		UpTime:  "n/a",
 		Engine:  "n/a",

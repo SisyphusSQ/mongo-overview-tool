@@ -1,0 +1,17 @@
+---
+description: 固定 MongoDB SDK 版本为 go.mongodb.org/mongo-driver v1.10.6
+alwaysApply: true
+---
+
+# MongoDB Driver 版本约束
+
+本项目中 **MongoDB 官方 Go SDK** 的版本必须固定为：
+
+- **模块**: `go.mongodb.org/mongo-driver`
+- **版本**: `v1.10.6`
+
+## 要求
+
+- 在 `go.mod` 中该依赖必须为 `v1.10.6`，不要升级或降级。
+- 添加或更新该依赖时使用：`go get go.mongodb.org/mongo-driver@v1.10.6`
+- 若 AI 或工具建议升级 mongo-driver，应保持 v1.10.6，除非项目维护者明确要求变更。

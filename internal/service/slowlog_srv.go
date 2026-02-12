@@ -19,24 +19,14 @@ var _ SlowlogSrv = (*SlowlogSrvImpl)(nil)
 
 type SlowlogSrv interface {
 	GetOverview() error
-	handleReplOverview(conn *mongo.Conn) error
-	handleNodeOverview(addr, db string) ([]*mongo.SlowlogView, error)
-
 	GetSlowDetail() error
-
 	Close()
 }
 
-var (
-	filterDBs = []string{"admin", "config", "local"}
-)
-
 type SlowlogSrvImpl struct {
 	sync.Mutex
-	ctx context.Context
-
-	clusterType clusterType
-	repl        map[string]string // replName -> replUri
+	ctx     context.Context
+	cluster *mongo.ClusterInfo
 
 	cfg  *config.SlowlogConfig
 	conn *mongo.Conn
@@ -45,43 +35,17 @@ type SlowlogSrvImpl struct {
 }
 
 func NewSlowlogSrv(ctx context.Context, cfg *config.SlowlogConfig, conn *mongo.Conn) (SlowlogSrv, error) {
-	s := &SlowlogSrvImpl{
-		ctx:      ctx,
-		cfg:      cfg,
-		conn:     conn,
-		repl:     make(map[string]string),
-		printSrv: NewPrintSrv(),
-	}
-
-	isSharding, err := conn.IsSharding(s.ctx)
+	cluster, err := mongo.DetectCluster(ctx, conn)
 	if err != nil {
 		return nil, err
 	}
 
-	if isSharding {
-		s.clusterType = shard
-		shStatus, err := conn.ListShards(s.ctx)
-		if err != nil {
-			l.Logger.Errorf("Failed to get shStatus: %v", err)
-			return nil, err
-		}
-
-		for _, sh := range shStatus.Shards {
-			uri := sh.GetUri()
-			if uri == "" {
-				return nil, fmt.Errorf("sh uri is empty, shardRs: %s", sh.Id)
-			}
-			s.repl[sh.Id] = uri
-		}
-	} else {
-		s.clusterType = repl
-		master, err := conn.IsMaster(s.ctx)
-		if err != nil {
-			l.Logger.Errorf("Failed to get rsStatus: %v", err)
-			return nil, err
-		}
-
-		s.repl[master.SetName] = master.Me
+	s := &SlowlogSrvImpl{
+		ctx:      ctx,
+		cfg:      cfg,
+		conn:     conn,
+		cluster:  cluster,
+		printSrv: NewPrintSrv(),
 	}
 
 	return s, nil
@@ -89,8 +53,8 @@ func NewSlowlogSrv(ctx context.Context, cfg *config.SlowlogConfig, conn *mongo.C
 
 func (s *SlowlogSrvImpl) GetOverview() error {
 	s.printSrv.Ahead(s.conn.URI)
-	switch s.clusterType {
-	case repl:
+	switch s.cluster.Type {
+	case mongo.ClusterRepl:
 		if err := s.printReplHosts(); err != nil {
 			l.Logger.Errorf("Failed to get replHosts: %v", err)
 			return err
@@ -100,7 +64,7 @@ func (s *SlowlogSrvImpl) GetOverview() error {
 			l.Logger.Errorf("Failed to get handleReplOverview, err: %v", err)
 			return err
 		}
-	case shard:
+	case mongo.ClusterShard:
 		listShards, err := s.conn.ListShards(s.ctx)
 		if err != nil {
 			l.Logger.Errorf("Failed to list shards: %v", err)
@@ -124,7 +88,7 @@ func (s *SlowlogSrvImpl) GetOverview() error {
 			}
 		}
 	default:
-		return fmt.Errorf("clusterType not support, clusterType: %s", s.clusterType)
+		return fmt.Errorf("clusterType not support, clusterType: %s", s.cluster.Type)
 	}
 
 	return nil
@@ -168,7 +132,7 @@ func (s *SlowlogSrvImpl) handleReplOverview(conn *mongo.Conn) error {
 		}
 
 		for _, db := range dbs {
-			if slices.Contains(filterDBs, db) {
+			if slices.Contains(config.FilterDBs, db) {
 				continue
 			}
 

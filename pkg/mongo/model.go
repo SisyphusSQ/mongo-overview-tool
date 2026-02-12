@@ -49,27 +49,27 @@ const (
 func (s ReplicaState) String() string {
 	switch s {
 	case StateStartup:
-		return "Startup (0) - 节点启动中，尚未加入副本集"
+		return "Startup (0) - starting, not yet in replica set"
 	case StatePrimary:
-		return "Primary (1) - 主节点，处理所有写操作"
+		return "Primary (1) - primary, handles all writes"
 	case StateSecondary:
-		return "Secondary (2) - 从节点，复制主节点数据，可处理读操作"
+		return "Secondary (2) - secondary, replicates from primary, can serve reads"
 	case StateRecovering:
-		return "Recovering (3) - 恢复中，可能正在同步数据"
+		return "Recovering (3) - recovering, may be syncing data"
 	case StateStartup2:
-		return "Startup2 (4) - 启动第二阶段，用于版本兼容性"
+		return "Startup2 (4) - startup phase 2, for version compatibility"
 	case StateUnknown:
-		return "Unknown (5) - 未知状态"
+		return "Unknown (5) - unknown state"
 	case StateArbiter:
-		return "Arbiter (6) - 仲裁节点，仅参与选举，不存储数据"
+		return "Arbiter (6) - arbiter, votes only, no data"
 	case StateDown:
-		return "Down (7) - 节点不可用"
+		return "Down (7) - node unavailable"
 	case StateRollback:
-		return "Rollback (8) - 正在执行回滚操作"
+		return "Rollback (8) - rolling back"
 	case StateShun:
-		return "Shun (9) - 节点被排斥，不参与副本集活动"
+		return "Shun (9) - shunned, not in replica set"
 	default:
-		return fmt.Sprintf("Unknown state (%d) - 未定义的副本集状态", s)
+		return fmt.Sprintf("Unknown state (%d) - undefined replica set state", s)
 	}
 }
 

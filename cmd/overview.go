@@ -52,15 +52,6 @@ var overviewCmd = &cobra.Command{
 }
 
 func initOverview() {
-	overviewCmd.Flags().BoolVar(&overCfg.Debug, "debug", false, "If debug_mode is true, print debug logs")
-
-	overviewCmd.Flags().StringVarP(&overCfg.Host, "host", "t", "127.0.0.1", "Server to connect to")
-	overviewCmd.Flags().IntVarP(&overCfg.Port, "port", "P", 27017, "Port to connect to")
-	overviewCmd.Flags().StringVarP(&overCfg.Username, "username", "u", "", "Username for authentication")
-	overviewCmd.Flags().StringVarP(&overCfg.Password, "password", "p", "", "Password for authentication")
-	overviewCmd.Flags().StringVar(&overCfg.AuthSource, "authSource", "admin", "User source")
-
-	overviewCmd.Flags().StringVar(&overCfg.MongoUri, "uri", "", "Connection string URI(Example:mongodb://192.168.0.5:9999/foo)")
-
+	registerBaseFlags(overviewCmd, &overCfg)
 	rootCmd.AddCommand(overviewCmd)
 }

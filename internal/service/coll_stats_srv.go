@@ -81,7 +81,7 @@ func (c *CollStatsSrvImpl) Stats(isSh bool) error {
 			collStats = make([]mongo.CollStats, 0)
 		)
 
-		if slices.Contains([]string{"admin", "config", "local"}, db) {
+		if slices.Contains(config.FilterDBs, db) {
 			l.Logger.Debugf("system database[%s], skip...", db)
 			continue
 		}

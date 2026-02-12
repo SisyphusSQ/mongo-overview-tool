@@ -68,15 +68,8 @@ var slowlogCmd = &cobra.Command{
 }
 
 func initSlowlogCmd() {
-	slowlogCmd.Flags().BoolVar(&slowlogCfg.Debug, "debug", false, "If debug_mode is true, print debug logs")
+	registerBaseFlags(slowlogCmd, &slowlogCfg.BaseCfg)
 
-	slowlogCmd.Flags().StringVarP(&slowlogCfg.Host, "host", "t", "127.0.0.1", "Server to connect to")
-	slowlogCmd.Flags().IntVarP(&slowlogCfg.Port, "port", "P", 27017, "Port to connect to")
-	slowlogCmd.Flags().StringVarP(&slowlogCfg.Username, "username", "u", "", "Username for authentication")
-	slowlogCmd.Flags().StringVarP(&slowlogCfg.Password, "password", "p", "", "Password for authentication")
-	slowlogCmd.Flags().StringVar(&slowlogCfg.AuthSource, "authSource", "admin", "User source")
-
-	slowlogCmd.Flags().StringVar(&slowlogCfg.MongoUri, "uri", "", "Connection string URI(Example:mongodb://192.168.0.5:9999/foo)")
 	slowlogCmd.Flags().StringVar(&slowlogCfg.QueryHash, "hash", "", "Query hash to filter slow log")
 	slowlogCmd.Flags().StringVar(&slowlogCfg.Sort, "sort", "cnt", "Sort field, default by cnt desc, list: cnt, maxMills, maxDocs")
 	slowlogCmd.Flags().StringVar(&slowlogCfg.DB, "db", "", "Database where slowlog in")

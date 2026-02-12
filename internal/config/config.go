@@ -6,14 +6,15 @@ import (
 	"strings"
 
 	"github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
-	"github.com/SisyphusSQ/mongo-overview-tool/utils"
 )
 
 const (
 	MongoUser = "MONGO_USER"
 	MongoPass = "MONGO_PASS"
 )
+
+// FilterDBs is the list of system databases to skip
+var FilterDBs = []string{"admin", "config", "local"}
 
 type BaseCfg struct {
 	Debug bool
@@ -46,6 +47,19 @@ type SlowlogConfig struct {
 	DB        string
 	Sort      string
 	QueryHash string
+}
+
+type BulkConfig struct {
+	BaseCfg
+
+	Database   string // 目标数据库（必填）
+	Collection string // 目标集合（必填）
+	Filter     string // JSON 格式的查询过滤条件，默认 "{}"
+	Update     string // JSON 格式的更新操作（仅 update 模式需要）
+	BatchSize  int    // 每批处理文档数，默认 1000
+	PauseMS    int    // 批次间暂停毫秒数，默认 100
+	DryRun     bool   // 试运行模式，仅统计匹配数量不实际执行
+	Output     string // 可选日志输出文件路径
 }
 
 var (
@@ -82,16 +96,6 @@ func BasePreCheck(cfg *BaseCfg) error {
 			return fmt.Errorf("invalid MongoDB URI: %s", cfg.MongoUri)
 		}
 		cfg.Auth = split[0] + "@"
-	}
-
-	cli, err := mongo.NewMongoConn(cfg.BuildUri)
-	if err != nil {
-		return err
-	}
-	defer cli.Close()
-
-	if !cli.IsGood() {
-		return fmt.Errorf("connect to %s failed: %v", utils.BlockPassword(cfg.BuildUri, "***"), err)
 	}
 
 	return nil

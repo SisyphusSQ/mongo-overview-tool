@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dustin/go-humanize"
 	"github.com/spf13/cast"
 	"go.mongodb.org/mongo-driver/bson"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/SisyphusSQ/mongo-overview-tool/internal/model"
 	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
 	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
+	"github.com/SisyphusSQ/mongo-overview-tool/utils"
 )
 
 var _ OverviewSrv = (*OverviewSrvImpl)(nil)
@@ -22,31 +22,11 @@ var _ OverviewSrv = (*OverviewSrvImpl)(nil)
 type OverviewSrv interface {
 	GetOverview() error
 	Close()
-
-	handleRepl(conn *mongo.Conn) error
-	handleNode(repl, addr, stateStr string) (*model.OverviewStats, error)
-
-	printReplHosts() error
-	printShHosts(shards mongo.ShStatus)
 }
 
-type clusterType string
-type nodeType string
-
-const (
-	repl  clusterType = "repl"
-	shard clusterType = "sharding"
-
-	primary   nodeType = "PRIMARY"
-	secondary nodeType = "SECONDARY"
-	arbiter   nodeType = "ARBITER"
-)
-
 type OverviewSrvImpl struct {
-	ctx context.Context
-
-	clusterType clusterType
-	repl        map[string]string // replName -> replUri
+	ctx     context.Context
+	cluster *mongo.ClusterInfo
 
 	cfg  *config.BaseCfg
 	conn *mongo.Conn
@@ -55,43 +35,17 @@ type OverviewSrvImpl struct {
 }
 
 func NewOverviewSrv(ctx context.Context, cfg *config.BaseCfg, conn *mongo.Conn) (OverviewSrv, error) {
-	o := &OverviewSrvImpl{
-		ctx:      ctx,
-		cfg:      cfg,
-		conn:     conn,
-		repl:     make(map[string]string),
-		printSrv: NewPrintSrv(),
-	}
-
-	isSharding, err := conn.IsSharding(o.ctx)
+	cluster, err := mongo.DetectCluster(ctx, conn)
 	if err != nil {
 		return nil, err
 	}
 
-	if isSharding {
-		o.clusterType = shard
-		shStatus, err := conn.ListShards(o.ctx)
-		if err != nil {
-			l.Logger.Errorf("Failed to get shStatus: %v", err)
-			return nil, err
-		}
-
-		for _, sh := range shStatus.Shards {
-			uri := sh.GetUri()
-			if uri == "" {
-				return nil, fmt.Errorf("sh uri is empty, shardRs: %s", sh.Id)
-			}
-			o.repl[sh.Id] = uri
-		}
-	} else {
-		o.clusterType = repl
-		master, err := conn.IsMaster(o.ctx)
-		if err != nil {
-			l.Logger.Errorf("Failed to get rsStatus: %v", err)
-			return nil, err
-		}
-
-		o.repl[master.SetName] = master.Me
+	o := &OverviewSrvImpl{
+		ctx:      ctx,
+		cfg:      cfg,
+		conn:     conn,
+		cluster:  cluster,
+		printSrv: NewPrintSrv(),
 	}
 
 	return o, nil
@@ -99,8 +53,8 @@ func NewOverviewSrv(ctx context.Context, cfg *config.BaseCfg, conn *mongo.Conn) 
 
 func (o *OverviewSrvImpl) GetOverview() error {
 	o.printSrv.Ahead(o.conn.URI)
-	switch o.clusterType {
-	case repl:
+	switch o.cluster.Type {
+	case mongo.ClusterRepl:
 		err := o.printReplHosts()
 		if err != nil {
 			l.Logger.Errorf("Failed to get replHosts: %v", err)
@@ -112,7 +66,7 @@ func (o *OverviewSrvImpl) GetOverview() error {
 			l.Logger.Errorf("Failed to get overview: %v", err)
 			return err
 		}
-	case shard:
+	case mongo.ClusterShard:
 		listShards, err := o.conn.ListShards(o.ctx)
 		if err != nil {
 			l.Logger.Errorf("Failed to list shards: %v", err)
@@ -160,10 +114,10 @@ func (o *OverviewSrvImpl) handleRepl(conn *mongo.Conn) error {
 			l.Logger.Errorf("Failed to handleNode: %v", err)
 			return err
 		}
-		if m.StateStr == string(primary) {
+		if m.StateStr == string(mongo.NodePrimary) {
 			s.Delay = "0s"
 			priOpTime = m.Optime.Ts.T
-		} else if m.StateStr == string(secondary) {
+		} else if m.StateStr == string(mongo.NodeSecondary) {
 			secOpTime[m.Name] = m.Optime.Ts.T
 		}
 
@@ -184,7 +138,7 @@ func (o *OverviewSrvImpl) handleRepl(conn *mongo.Conn) error {
 
 func (o *OverviewSrvImpl) handleNode(repl, addr, stateStr string) (*model.OverviewStats, error) {
 	s := model.NewOverviewStats(repl, addr, stateStr)
-	if stateStr == string(arbiter) {
+	if stateStr == string(mongo.NodeArbiter) {
 		return s, nil
 	}
 
@@ -207,7 +161,7 @@ func (o *OverviewSrvImpl) handleNode(repl, addr, stateStr string) (*model.Overvi
 		s.Conn = cast.ToString(connections["current"])
 	}
 	if mem, ok := status["mem"].(bson.M); ok {
-		s.MenRes = cast.ToString(mem["resident"])
+		s.MemRes = cast.ToString(mem["resident"])
 	}
 
 	// engine only can be wiredTiger
@@ -245,8 +199,8 @@ func (o *OverviewSrvImpl) handleNode(repl, addr, stateStr string) (*model.Overvi
 				s.CacheSize = cast.ToInt64(ch["maximum bytes configured"])
 				s.CacheUsed = cast.ToInt64(ch["bytes currently in the cache"])
 
-				s.Size = strings.ReplaceAll(humanize.Bytes(uint64(s.CacheSize)), " ", "")
-				s.MenRes = strings.ReplaceAll(humanize.Bytes(uint64(s.CacheUsed)), " ", "")
+				s.Size = utils.HumanizeBytes(uint64(s.CacheSize))
+				s.MemRes = utils.HumanizeBytes(uint64(s.CacheUsed))
 				s.MemUsed = fmt.Sprintf("%.1f%%", float64(s.CacheUsed)*100.0/float64(s.CacheSize))
 			}
 		}

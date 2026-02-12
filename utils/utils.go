@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dustin/go-humanize"
 	"github.com/fatih/color"
 )
 
@@ -52,6 +53,11 @@ func BlockPassword(url, replace string) string {
 func PrintCost(start time.Time) {
 	fmt.Printf("Cost: %s\n", color.GreenString(time.Since(start).String()))
 
+}
+
+// HumanizeBytes formats bytes into a human-readable string without spaces.
+func HumanizeBytes(size uint64) string {
+	return strings.ReplaceAll(humanize.Bytes(size), " ", "")
 }
 
 func IsMultiHosts(uri string) (bool, error) {

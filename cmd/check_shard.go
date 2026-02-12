@@ -52,19 +52,11 @@ var shardCmd = &cobra.Command{
 }
 
 func initCheckShard() {
-	shardCmd.Flags().BoolVar(&shCfg.Debug, "debug", false, "If debug_mode is true, print debug logs")
-	shardCmd.Flags().BoolVar(&shCfg.ShowAll, "show-all", false, "If show-all is true, print all collections whether is sharded or not")
+	registerBaseFlags(shardCmd, &shCfg.BaseCfg)
 
+	shardCmd.Flags().BoolVar(&shCfg.ShowAll, "show-all", false, "If show-all is true, print all collections whether is sharded or not")
 	shardCmd.Flags().StringVar(&shCfg.Database, "database", "", "ShardDatabase to check(Example: db1 or db1,db2)")
 	shardCmd.Flags().StringVar(&shCfg.Collection, "coll", "", "Collection to check(Example: col1 or col1,col2)")
-
-	shardCmd.Flags().StringVarP(&shCfg.Host, "host", "t", "127.0.0.1", "Server to connect to")
-	shardCmd.Flags().IntVarP(&shCfg.Port, "port", "P", 27017, "Port to connect to")
-	shardCmd.Flags().StringVarP(&shCfg.Username, "username", "u", "", "Username for authentication")
-	shardCmd.Flags().StringVarP(&shCfg.Password, "password", "p", "", "Password for authentication")
-	shardCmd.Flags().StringVar(&shCfg.AuthSource, "authSource", "admin", "User source")
-
-	shardCmd.Flags().StringVar(&shCfg.MongoUri, "uri", "", "Connection string URI(Example:mongodb://192.168.0.5:9999/foo)")
 
 	rootCmd.AddCommand(shardCmd)
 }

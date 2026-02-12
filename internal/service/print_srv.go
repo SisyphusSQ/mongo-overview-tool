@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/dustin/go-humanize"
 	"github.com/fatih/color"
 	"github.com/spf13/cast"
 
@@ -41,7 +39,6 @@ type PrintSrv interface {
 }
 
 type PrintSrvImpl struct {
-	lock  sync.Mutex
 	width int
 }
 
@@ -91,7 +88,7 @@ func (p *PrintSrvImpl) OverviewRepl(stats []*model.OverviewStats) {
 		}
 	}
 
-	color.Cyan("%-*s%-23s%-*s%-6s%-6s%-6s%-4s%-4s%-7s%-10s%-10s%-7s%-15s%-10s\n", replWidth, "repl", "host", stateWidth, "state", "conn", "qr", "qw", "ar", "aw", "size", "memUsed", "menRes", "delay", "uptime", "version")
+	color.Cyan("%-*s%-23s%-*s%-6s%-6s%-6s%-4s%-4s%-7s%-10s%-10s%-7s%-15s%-10s\n", replWidth, "repl", "host", stateWidth, "state", "conn", "qr", "qw", "ar", "aw", "size", "memUsed", "memRes", "delay", "uptime", "version")
 	fmt.Printf("%-*s%-23s%-*s%-6s%-6s%-6s%-4s%-4s%-7s%-10s%-10s%-7s%-15s%-10s\n", replWidth, "----", "----", stateWidth, "-----", "----", "--", "--", "--", "--", "----", "-------", "-------", "-----", "------", "-------")
 
 	for _, stat := range stats {
@@ -152,7 +149,7 @@ func (p *PrintSrvImpl) OverviewRepl(stats []*model.OverviewStats) {
 			stat.Size,
 			usedWidth,
 			stat.MemUsed,
-			stat.MenRes,
+			stat.MemRes,
 			stat.Delay,
 			stat.UpTime,
 			stat.Version,
@@ -163,7 +160,7 @@ func (p *PrintSrvImpl) OverviewRepl(stats []*model.OverviewStats) {
 func (p *PrintSrvImpl) ShardDatabase(db mongo.DBStats, width int) {
 	p.width = width
 	fmt.Printf("Database: %s\n", color.GreenString(db.DB))
-	fmt.Printf("TotalSize: %s\n", color.GreenString(strings.ReplaceAll(humanize.Bytes(uint64(db.StorageSize)), " ", "")))
+	fmt.Printf("TotalSize: %s\n", color.GreenString(utils.HumanizeBytes(uint64(db.StorageSize))))
 
 	color.Cyan("%-*s%-12s%-15s%-15s%-15s\n", width, "ns", "isSharded", "documents", "avgObjSize", "storageSize")
 	fmt.Printf("%-*s%-12s%-15s%-15s%-15s\n", width, "--", "---------", "---------", "----------", "-----------")
@@ -172,7 +169,7 @@ func (p *PrintSrvImpl) ShardDatabase(db mongo.DBStats, width int) {
 func (p *PrintSrvImpl) Database(db mongo.DBStats, width int) {
 	p.width = width
 	fmt.Printf("Database: %s\n", color.GreenString(db.DB))
-	fmt.Printf("TotalSize: %s\n", color.GreenString(strings.ReplaceAll(humanize.Bytes(uint64(db.StorageSize)), " ", "")))
+	fmt.Printf("TotalSize: %s\n", color.GreenString(utils.HumanizeBytes(uint64(db.StorageSize))))
 
 	color.Cyan("%-*s%-15s%-15s%-15s\n", width, "ns", "documents", "avgObjSize", "storageSize")
 	fmt.Printf("%-*s%-15s%-15s%-15s\n", width, "--", "---------", "----------", "-----------")
@@ -203,8 +200,8 @@ func (p *PrintSrvImpl) ShardCollStats(stats mongo.CollStats, showAll bool) {
 		shWidth,
 		isSh,
 		cast.ToString(stats.Count),
-		strings.ReplaceAll(humanize.Bytes(uint64(stats.AvgObjSize)), " ", ""),
-		strings.ReplaceAll(humanize.Bytes(uint64(stats.StorageSize)), " ", ""),
+		utils.HumanizeBytes(uint64(stats.AvgObjSize)),
+		utils.HumanizeBytes(uint64(stats.StorageSize)),
 	)
 }
 
@@ -213,8 +210,8 @@ func (p *PrintSrvImpl) CollStats(stats mongo.CollStats) {
 		p.width,
 		stats.Ns,
 		cast.ToString(stats.Count),
-		strings.ReplaceAll(humanize.Bytes(uint64(stats.AvgObjSize)), " ", ""),
-		strings.ReplaceAll(humanize.Bytes(uint64(stats.StorageSize)), " ", ""),
+		utils.HumanizeBytes(uint64(stats.AvgObjSize)),
+		utils.HumanizeBytes(uint64(stats.StorageSize)),
 	)
 }
 

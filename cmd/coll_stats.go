@@ -52,18 +52,10 @@ var collStatsCmd = &cobra.Command{
 }
 
 func initCollStats() {
-	collStatsCmd.Flags().BoolVar(&collCfg.Debug, "debug", false, "If debug_mode is true, print debug logs")
+	registerBaseFlags(collStatsCmd, &collCfg.BaseCfg)
 
 	collStatsCmd.Flags().StringVar(&collCfg.Database, "database", "", "ShardDatabase to check(Example: db1 or db1,db2)")
 	collStatsCmd.Flags().StringVar(&collCfg.Collection, "coll", "", "Collection to check(Example: col1 or col1,col2)")
-
-	collStatsCmd.Flags().StringVarP(&collCfg.Host, "host", "t", "127.0.0.1", "Server to connect to")
-	collStatsCmd.Flags().IntVarP(&collCfg.Port, "port", "P", 27017, "Port to connect to")
-	collStatsCmd.Flags().StringVarP(&collCfg.Username, "username", "u", "", "Username for authentication")
-	collStatsCmd.Flags().StringVarP(&collCfg.Password, "password", "p", "", "Password for authentication")
-	collStatsCmd.Flags().StringVar(&collCfg.AuthSource, "authSource", "admin", "User source")
-
-	collStatsCmd.Flags().StringVar(&collCfg.MongoUri, "uri", "", "Connection string URI(Example:mongodb://192.168.0.5:9999/foo)")
 
 	rootCmd.AddCommand(collStatsCmd)
 }
