@@ -1,3 +1,12 @@
+## v1.1.0(20260214)
+#### feature:
+1. 支持 Mongo Shell 查询语法：`--filter` 与 `--update` 参数支持使用 `ISODate()`, `ObjectId()`, 无引号键名, 单引号字符串等 Shell 风格语法，自动转换为 Extended JSON，提升 CLI 易用性
+
+#### optimization:
+1. 完善 `pkg/mongo/bson` 测试覆盖：新增 `bson_test.go`，覆盖 Shell 语法转换、混合写法及边界场景
+2. 更新 `bulk` 命令文档：增加 Shell 语法示例，优化 flag 说明
+
+
 ## v1.0.0(20260212)
 #### feature:
 1. 新增 `bulk-delete`、`bulk-update` 子命令：支持按批次大小与暂停间隔的流控批量删除/更新，支持 `--dry-run` 试运行与 `-o` 日志输出。

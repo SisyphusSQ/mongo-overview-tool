@@ -5,6 +5,8 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
 )
 
 // TestParseBsonDoc 解析 JSON 与 ExtJSON 字符串为 bson.D。
@@ -20,7 +22,7 @@ func TestParseBsonDoc(t *testing.T) {
 		// 用例说明: 验证 parseBsonDoc 在 "{}" 输入下返回空 bson.D（匹配全部）。
 		input := "{}"
 		t.Logf("case=empty filter, input=%s", input)
-		got, err := parseBsonDoc(input)
+		got, err := mongo.ParseBsonDoc(input)
 		if err != nil {
 			t.Fatalf("parse empty filter failed: %v", err)
 		}
@@ -35,7 +37,7 @@ func TestParseBsonDoc(t *testing.T) {
 		// 用例说明: 验证 parseBsonDoc 能正确解析普通 JSON 键值过滤条件。
 		input := `{"status":"inactive"}`
 		t.Logf("case=normal json filter, input=%s", input)
-		got, err := parseBsonDoc(input)
+		got, err := mongo.ParseBsonDoc(input)
 		if err != nil {
 			t.Fatalf("parse normal filter failed: %v", err)
 		}
@@ -50,7 +52,7 @@ func TestParseBsonDoc(t *testing.T) {
 		// 用例说明: 验证 parseBsonDoc 对 ExtJSON $date 的解析结果为 primitive.DateTime。
 		input := `{"createdAt":{"$lt":{"$date":"2024-01-01T00:00:00Z"}}}`
 		t.Logf("case=extjson date filter, input=%s", input)
-		got, err := parseBsonDoc(input)
+		got, err := mongo.ParseBsonDoc(input)
 		if err != nil {
 			t.Fatalf("parse extjson filter failed: %v", err)
 		}

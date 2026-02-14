@@ -150,11 +150,16 @@ mot slowlog --hash xxxxxxxx
 - `-o, --output`: 日志输出文件路径。
 
 说明:
-- `--filter` 支持 MongoDB ExtJSON（例如 `$date`、`$oid`）。
+- `--filter` 支持 **MongoDB Shell 语法**（如 `ISODate(...)`、`ObjectId(...)`、无引号键名）及标准 ExtJSON。
 
 **使用示例:**
 
 ```bash
+# 使用 Shell 语法：删除 createTime 早于 2024-01-01 的文档
+mot bulk-delete -d mydb -c users \
+  -f '{createTime: {$lt: ISODate("2024-01-01T00:00:00Z")}}' \
+  --dry-run
+
 # 试运行：查看将要删除多少条 status 为 inactive 的数据
 mot bulk-delete -d mydb -c users -f '{"status":"inactive"}' --dry-run
 
@@ -174,12 +179,18 @@ mot bulk-delete -t 10.0.0.1 -P 27017 \
 - `--update`: **(必填)** JSON 格式的更新操作（如 `{"$set": ...}`）。
 
 说明:
-- `--filter` 与 `--update` 均支持 MongoDB ExtJSON。
+- `--filter` 与 `--update` 均支持 **MongoDB Shell 语法**（如 `ISODate(...)`、无引号键名）及标准 ExtJSON。
 - 运行结果会区分三个指标：`processed`（已处理文档数）、`matched`（命中文档数）、`modified`（实际修改文档数）。
 
 **使用示例:**
 
 ```bash
+# 使用 Shell 语法：将 status: "pending" 更新为 "archived"
+mot bulk-update -d mydb -c orders \
+    -f '{status: "pending"}' \
+    --update '{$set: {status: "archived"}}' \
+    --dry-run
+
 # 简单更新：将 status 为 pending 的订单更新为 archived
 mot bulk-update -d mydb -c orders \
     -f '{"status":"pending"}' \

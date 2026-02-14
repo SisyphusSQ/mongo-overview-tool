@@ -22,8 +22,10 @@ var bulkDeleteCmd = &cobra.Command{
 	Use:   "bulk-delete",
 	Short: "Batch delete documents from a collection",
 	Long:  `Batch delete documents from a MongoDB collection with controlled batch size and pause intervals to minimize impact on production traffic.`,
-	Example: fmt.Sprintf(`  %s bulk-delete -t 10.0.0.1 -P 27017 -d mydb -c users -f '{"status":"inactive"}' -b 500 --pause-ms 200
-  %s bulk-delete --uri "mongodb://user:pass@host:27017" -d mydb -c users -f '{"status":"inactive"}' --dry-run`,
+	Example: fmt.Sprintf(`  # JSON format
+  %s bulk-delete -t 10.0.0.1 -P 27017 -d mydb -c users -f '{"status":"inactive"}' -b 500 --pause-ms 200
+  # Shell syntax (unquoted keys, ISODate, ObjectId, etc.)
+  %s bulk-delete --uri "mongodb://user:pass@host:27017" -d mydb -c users -f '{hitCreateTime: {$lt: ISODate("2024-01-01T00:00:00Z")}}' --dry-run`,
 		vars.AppName, vars.AppName),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runBulkDelete()
@@ -34,8 +36,10 @@ var bulkUpdateCmd = &cobra.Command{
 	Use:   "bulk-update",
 	Short: "Batch update documents in a collection",
 	Long:  `Batch update documents in a MongoDB collection with controlled batch size and pause intervals to minimize impact on production traffic.`,
-	Example: fmt.Sprintf(`  %s bulk-update -t 10.0.0.1 -P 27017 -d mydb -c orders -f '{"status":"pending"}' --update '{"$set":{"status":"archived"}}' -b 1000 --pause-ms 100
-  %s bulk-update --uri "mongodb://user:pass@host:27017" -d mydb -c orders -f '{"status":"pending"}' --update '{"$set":{"status":"archived"}}' --dry-run -o bulk.log`,
+	Example: fmt.Sprintf(`  # JSON format
+  %s bulk-update -t 10.0.0.1 -P 27017 -d mydb -c orders -f '{"status":"pending"}' --update '{"$set":{"status":"archived"}}' -b 1000 --pause-ms 100
+  # Shell syntax (unquoted keys, ISODate, single quotes, etc.)
+  %s bulk-update --uri "mongodb://user:pass@host:27017" -d mydb -c orders -f '{status: "pending"}' --update '{$set: {status: "archived"}}' --dry-run -o bulk.log`,
 		vars.AppName, vars.AppName),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runBulkUpdate()
@@ -161,7 +165,7 @@ func registerBulkFlags(cmd *cobra.Command, cfg *config.BulkConfig) {
 
 	cmd.Flags().StringVarP(&cfg.Database, "database", "d", "", "Target database (required)")
 	cmd.Flags().StringVarP(&cfg.Collection, "collection", "c", "", "Target collection (required)")
-	cmd.Flags().StringVarP(&cfg.Filter, "filter", "f", "{}", `Query filter in JSON format (e.g. '{"status":"inactive"}')`)
+	cmd.Flags().StringVarP(&cfg.Filter, "filter", "f", "{}", `Query filter in JSON or Shell format (e.g. '{"status":"inactive"}' or '{status: "inactive", ts: {$lt: ISODate("2024-01-01T00:00:00Z")}}')`)
 	cmd.Flags().IntVarP(&cfg.BatchSize, "batch-size", "b", 1000, "Number of documents per batch")
 	cmd.Flags().IntVar(&cfg.PauseMS, "pause-ms", 100, "Pause duration in milliseconds between batches")
 	cmd.Flags().BoolVar(&cfg.DryRun, "dry-run", false, "Only count matched documents, do not execute")
@@ -190,6 +194,6 @@ func initBulkDelete() {
 // 注意: 在 initAll() 中调用，额外注册 --update 参数。
 func initBulkUpdate() {
 	registerBulkFlags(bulkUpdateCmd, &bulkUpdateCfg)
-	bulkUpdateCmd.Flags().StringVar(&bulkUpdateCfg.Update, "update", "", `Update operation in JSON format (e.g. '{"$set":{"status":"archived"}}') (required)`)
+	bulkUpdateCmd.Flags().StringVar(&bulkUpdateCfg.Update, "update", "", `Update operation in JSON or Shell format (e.g. '{"$set":{"status":"archived"}}' or '{$set: {status: "archived"}}') (required)`)
 	rootCmd.AddCommand(bulkUpdateCmd)
 }

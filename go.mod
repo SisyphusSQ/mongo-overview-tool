@@ -1,6 +1,6 @@
 module github.com/SisyphusSQ/mongo-overview-tool
 
-go 1.24
+go 1.26
 
 require (
 	github.com/dustin/go-humanize v1.0.1
@@ -8,8 +8,8 @@ require (
 	github.com/spf13/cast v1.9.2
 	github.com/spf13/cobra v1.9.1
 	go.mongodb.org/mongo-driver v1.10.6
-	go.uber.org/zap v1.27.0
-	golang.org/x/sync v0.8.0
+	go.uber.org/zap v1.27.1
+	golang.org/x/sync v0.19.0
 )
 
 require (
