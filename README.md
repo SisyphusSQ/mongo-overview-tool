@@ -10,6 +10,23 @@
 - **慢日志分析 (`slowlog`)**: 聚合分析慢查询日志，支持按执行次数、最大耗时等排序。
 - **批量操作 (`bulk-delete` / `bulk-update`)**: 支持流控的批量删除和更新操作，减少对线上业务的影响。
 
+## Harness 控制面
+
+本仓使用 `docs/harness/` 和 `.agents/` 维护 agent 协作控制面。默认 workflow skill 包括：
+
+- `.agents/skills/issue-goal-prompt/SKILL.md`：从 Linear / repo issue / 设计文档 / runbook 生成执行级 Goal Prompt。
+- `.agents/skills/project-plan-archive/SKILL.md`：归档已完成计划。
+- `.agents/skills/project-version-release/SKILL.md`：维护版本和 release 边界。
+- `.agents/skills/test-runbook/SKILL.md`：生成、执行和回写测试 runbook。
+
+稳定验证入口：
+
+```bash
+make harness-verify
+go test ./...
+make test
+```
+
 ## 安装与构建
 
 ### 源码构建

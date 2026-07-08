@@ -22,6 +22,7 @@
 | 计划协议 | `.agents/PLANS.md` |
 | 计划主模板 | `.agents/plans/TEMPLATE.md` |
 | 默认技能层 | `.agents/skills/` |
+| Issue goal prompt skill | `.agents/skills/issue-goal-prompt/SKILL.md` |
 | 计划归档 skill | `.agents/skills/project-plan-archive/SKILL.md` |
 | 版本发布 skill | `.agents/skills/project-version-release/SKILL.md` |
 | 测试 runbook skill | `.agents/skills/test-runbook/SKILL.md` |
@@ -39,7 +40,7 @@
 | `docs/harness/` | 控制面规则、Issue Workflow、Issue Tracker profile 与项目级机械约束登记 |
 | `docs/issues/` | `issue-provider=repo` 时的仓库 issue 存储 |
 | `.agents/PLANS.md` + `.agents/plans/` | 计划协议、计划主模板和本地计划实例 |
-| `.agents/skills/` | base 默认 repo-local workflow skill：计划归档、版本发布边界、测试 runbook 执行与回写 |
+| `.agents/skills/` | base 默认 repo-local workflow skill：issue goal prompt、计划归档、版本发布边界、测试 runbook 执行与回写 |
 | `.agents/state/` + `.agents/runs/` | repo-local 恢复点与结果摘要面 |
 | `.agents/prompts/` | 可选 Prompt 模板，仅 agent 驱动初始化时补充；默认使用 `full` |
 | `.agents/guides/` | 可选 review / linter 说明，仅 agent 驱动初始化时补充；默认使用 `full` |
