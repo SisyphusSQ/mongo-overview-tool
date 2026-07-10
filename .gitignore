@@ -33,6 +33,10 @@ build/
 coverage.out
 coverage.html
 
+# Python helper caches
+__pycache__/
+*.py[cod]
+
 # Go workspace and coverage variants
 go.work
 go.work.sum
@@ -42,3 +46,7 @@ profile.cov
 
 # Local environment
 .env
+
+# Test runbooks are local result documents; keep only the shared template.
+docs/test/**
+!docs/test/RUNBOOK_TEMPLATE.md

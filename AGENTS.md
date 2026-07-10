@@ -71,9 +71,9 @@
 - 若存在 `.agents/prompts/maintenance-loop.md`，默认只做 `report-only` 维护扫描；`issue-create / safe-fix / rule-promotion` 必须由用户显式指定
 - 模板配置可提交
 - 若需要环境配置，可按项目约定提交 `.env.example`、`settings.example.yaml` 这类示例文件
-- `docs/test/*` 默认提交可复用 runbook 与当前 / 本次验证结果摘要
+- `docs/test/RUNBOOK_TEMPLATE.md` 默认提交；其余 `docs/test/*` 是本地脱敏 runbook / 结果摘要，默认忽略
 - `docs/issues/*` 默认提交工具中立 issue 与 writeback log
-- 已写入 `docs/test/*` 的验证结果摘要是提交版测试真相，后续同步或 closeout 不得删成空模板
+- 已写入 `docs/test/*` 的验证结果摘要是本地脱敏测试真相，后续同步或 closeout 不得删成空模板；原始结果仍放 `.agents/runs/*`
 - `.agents/state/*` 与 `.agents/runs/*` 的真实运行文件默认不提交
 - 本地日志、数据库文件、缓存、IDE 私有文件默认不提交
 - `.cursor/` 默认不提交；旧 Cursor 规则已迁移到本文件和 `docs/harness/project-constraints.md`

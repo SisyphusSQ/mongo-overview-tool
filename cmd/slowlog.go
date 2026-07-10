@@ -3,15 +3,16 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/SisyphusSQ/mongo-overview-tool/internal/clioutput"
 	"github.com/SisyphusSQ/mongo-overview-tool/internal/config"
-	"github.com/SisyphusSQ/mongo-overview-tool/internal/service"
 	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
+	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
 	"github.com/SisyphusSQ/mongo-overview-tool/utils"
 	"github.com/SisyphusSQ/mongo-overview-tool/vars"
 )
@@ -38,27 +39,36 @@ var slowlogCmd = &cobra.Command{
 		} else {
 			slowlogCfg.Detail = true
 		}
-		conn, err := mongo.NewMongoConn(slowlogCfg.BuildUri)
-		if err != nil {
-			l.Logger.Errorf("NewMongoConn failed, err: %v", err)
-			return err
-		}
 
-		slowSrv, err := service.NewSlowlogSrv(context.Background(), &slowlogCfg, conn)
+		ctx := context.Background()
+		client, err := mot.NewClient(ctx, sdkOptionsFromBase(&slowlogCfg.BaseCfg))
 		if err != nil {
-			l.Logger.Errorf("NewSlowlogSrv failed, err: %v", err)
+			l.Logger.Errorf("mot.NewClient failed, err: %v", err)
 			return err
 		}
-		defer slowSrv.Close()
+		defer closeSDKClient(client)
 
 		if slowlogCfg.Overview {
-			if err = slowSrv.GetOverview(); err != nil {
-				l.Logger.Errorf("GetOverview failed, err: %v", err)
+			result, err := client.SlowlogSummary(ctx, mot.SlowlogOptions{
+				Databases: splitCSV(slowlogCfg.DB),
+				Sort:      mot.SlowlogSort(slowlogCfg.Sort),
+			})
+			if err != nil {
+				l.Logger.Errorf("SlowlogSummary failed, err: %v", err)
+				return err
+			}
+			if err = clioutput.PrintSlowlogSummary(os.Stdout, result, clioutput.SlowlogPrintOptions{URI: slowlogCfg.BuildUri}); err != nil {
+				l.Logger.Errorf("PrintSlowlogSummary failed, err: %v", err)
 				return err
 			}
 		} else {
-			if err = slowSrv.GetSlowDetail(); err != nil {
-				l.Logger.Errorf("GetSlowDetail failed, err: %v", err)
+			result, err := client.SlowlogDetail(ctx, slowlogCfg.DB, slowlogCfg.QueryHash)
+			if err != nil {
+				l.Logger.Errorf("SlowlogDetail failed, err: %v", err)
+				return err
+			}
+			if err = clioutput.PrintSlowlogDetail(os.Stdout, result, clioutput.SlowlogPrintOptions{URI: slowlogCfg.BuildUri}); err != nil {
+				l.Logger.Errorf("PrintSlowlogDetail failed, err: %v", err)
 				return err
 			}
 		}

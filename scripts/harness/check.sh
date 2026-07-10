@@ -28,7 +28,9 @@ required_files=(
   ".agents/skills/project-version-release/SKILL.md"
   ".agents/skills/project-version-release/agents/openai.yaml"
   ".agents/skills/project-version-release/references/project-version-policy.md"
+  ".agents/skills/project-version-release/references/github-go-binary-release.md"
   ".agents/skills/project-version-release/scripts/project_version_release.py"
+  ".agents/skills/project-version-release/tests/test_project_version_release.py"
   ".agents/skills/test-runbook/SKILL.md"
   ".agents/skills/test-runbook/agents/openai.yaml"
   ".agents/state/TEMPLATE.md"
@@ -87,7 +89,9 @@ required_skill_patterns=(
   ".agents/skills/project-plan-archive/scripts/project_plan_archive.py|Project plan archive helper"
   ".agents/skills/project-plan-archive/scripts/project_plan_archive.py|--write"
   ".agents/skills/project-version-release/SKILL.md|issue 是执行粒度，release 是发布粒度"
-  ".agents/skills/project-version-release/SKILL.md|CHANGELOG.md -> Unreleased"
+  ".agents/skills/project-version-release/SKILL.md|changeLog.md -> Unreleased"
+  ".agents/skills/project-version-release/SKILL.md|GitHub Go 多平台二进制 Release"
+  ".agents/skills/project-version-release/references/github-go-binary-release.md|--verify-tag"
   ".agents/skills/project-version-release/scripts/project_version_release.py|Project version/release helper"
   ".agents/skills/project-version-release/references/project-version-policy.md|Project Version Policy"
   ".agents/skills/test-runbook/SKILL.md|执行副作用"
@@ -147,6 +151,8 @@ required_gitignore_patterns=(
   "!.agents/runs/TEMPLATE.md"
   ".agents/plans/**/*.md"
   "!.agents/plans/TEMPLATE.md"
+  "docs/test/**"
+  "!docs/test/RUNBOOK_TEMPLATE.md"
   ".cursor/"
 )
 
@@ -157,8 +163,13 @@ for pattern in "${required_gitignore_patterns[@]}"; do
   fi
 done
 
-if rg -n "^docs/test" .gitignore >/dev/null; then
-  echo ".gitignore should not ignore docs/test runbook documents" >&2
+if ! git check-ignore -q docs/test/example/live-runbook.md; then
+  echo ".gitignore should ignore concrete docs/test runbook documents" >&2
+  exit 1
+fi
+
+if git check-ignore -q docs/test/RUNBOOK_TEMPLATE.md; then
+  echo ".gitignore should keep docs/test/RUNBOOK_TEMPLATE.md trackable" >&2
   exit 1
 fi
 

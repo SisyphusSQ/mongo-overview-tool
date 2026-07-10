@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 
-CHANGELOG = "CHANGELOG.md"
+CHANGELOG = "changeLog.md"
 SEMVER_RE = re.compile(
     r"^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
     r"(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?"
@@ -90,7 +90,7 @@ def check_repo(repo: Path) -> dict[str, Any]:
 
     changelog = repo / CHANGELOG
     if not changelog.exists():
-        findings.append(Finding("error", CHANGELOG, "missing CHANGELOG.md"))
+        findings.append(Finding("error", CHANGELOG, f"missing {CHANGELOG}"))
     else:
         text = read_text(changelog)
         if not re.search(r"(?m)^##\s+Unreleased\s*$", text):
@@ -140,7 +140,7 @@ def classify(paths: list[str], issue: str | None = None, release_intent: bool = 
 
     if any(p == CHANGELOG or p.endswith(f"/{CHANGELOG}") for p in changed):
         classification = "changelog-only"
-        reasons.append("CHANGELOG.md changed")
+        reasons.append(f"{CHANGELOG} changed")
 
     if any(Path(p).name in VERSION_FILE_HINTS for p in changed):
         classification = "version-bump"
@@ -162,7 +162,7 @@ def classify(paths: list[str], issue: str | None = None, release_intent: bool = 
 
 
 def find_unreleased_bounds(text: str) -> tuple[int, int, int, int] | None:
-    match = re.search(r"(?m)^##\s+Unreleased\s*$", text)
+    match = re.search(r"(?m)^##[ \t]+Unreleased[ \t]*$", text)
     if not match:
         return None
     next_heading = re.search(r"(?m)^##?\s+", text[match.end() :])
@@ -226,7 +226,13 @@ def changelog_add(repo: Path, issue: str, category: str, text: str, write: bool)
     body = normalized[body_start:body_end]
     entry = f"[{issue}] {text}" if issue else text
     updated_body = add_entry_to_block(body, category, entry)
-    updated = normalized[:body_start] + updated_body.rstrip() + "\n\n" + normalized[body_end:].lstrip("\n")
+    updated = (
+        normalized[:body_start].rstrip()
+        + "\n"
+        + updated_body.strip()
+        + "\n\n"
+        + normalized[body_end:].lstrip("\n")
+    )
 
     if write:
         write_text(path, updated)

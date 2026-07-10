@@ -3,8 +3,6 @@ package mongo
 import (
 	"context"
 	"fmt"
-
-	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
 )
 
 type ClusterType string
@@ -38,8 +36,7 @@ func DetectCluster(ctx context.Context, conn *Conn) (*ClusterInfo, error) {
 		info.Type = ClusterShard
 		shStatus, err := conn.ListShards(ctx)
 		if err != nil {
-			l.Logger.Errorf("Failed to get shStatus: %v", err)
-			return nil, err
+			return nil, fmt.Errorf("list shards: %w", err)
 		}
 
 		for _, sh := range shStatus.Shards {
@@ -53,8 +50,7 @@ func DetectCluster(ctx context.Context, conn *Conn) (*ClusterInfo, error) {
 		info.Type = ClusterRepl
 		master, err := conn.IsMaster(ctx)
 		if err != nil {
-			l.Logger.Errorf("Failed to get rsStatus: %v", err)
-			return nil, err
+			return nil, fmt.Errorf("get replica set primary: %w", err)
 		}
 
 		info.Repl[master.SetName] = master.Me

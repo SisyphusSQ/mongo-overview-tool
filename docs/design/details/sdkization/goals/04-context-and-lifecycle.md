@@ -65,6 +65,10 @@ func (c *Client) BulkUpdate(ctx context.Context, opts BulkUpdateOptions) (*BulkR
 5. `client.Ping(ctx, readPreference)`。
 6. 返回 `*Client`。
 
+如果 `mongo.Connect` 成功但 `Ping` 失败，构造函数必须使用有界 cleanup context 断开已创建的 client，避免失败重试积累连接资源。
+
+Overview / Slowlog 访问副本集成员时，派生连接 URI 必须保留原 URI 的认证、TLS、证书、压缩和 timeout 参数，并重新计算 `directConnection`、`replicaSet`、`readPreference` 等拓扑参数。注入 client 若未提供可用于派生的 `ClientOptions.URI`，需要成员连接的能力应返回明确的配置错误。
+
 示例：
 
 ```go
@@ -114,7 +118,8 @@ func (c *Client) Close(ctx context.Context) error
 - `Close` 幂等。
 - 如果 client 不拥有底层连接，`Close` 返回 nil。
 - 如果 ctx 已取消，直接返回 ctx 错误或 driver disconnect 错误。
-- 不使用 `context.Background()`。
+- 非空 ctx 原样传给 driver；nil ctx 仅作为防御性输入归一化为 `context.Background()`。
+- 业务查询不得脱离调用方 ctx；只有失败连接、派生成员连接和 cursor 的资源释放可以使用 `context.WithoutCancel(ctx)` 派生的有界 cleanup context，避免业务取消后跳过清理。
 
 ## 批量操作取消
 
@@ -170,7 +175,7 @@ if errors.Is(err, mot.ErrCancelled) {
 ## 验收标准
 
 - `pkg/mot` 所有公开方法首参为 `context.Context`。
-- SDK 核心路径不使用不可取消的 `context.Background()`。
+- SDK 业务查询路径不使用不可取消的 `context.Background()`；nil ctx 防御性归一化和有界资源清理除外。
 - context canceled 单测能快速通过，不等待真实长超时。
 - `Close(ctx)` 支持调用方控制断开超时。
 - Bulk 取消时返回部分结果和可识别错误。

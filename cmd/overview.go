@@ -3,14 +3,15 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/SisyphusSQ/mongo-overview-tool/internal/clioutput"
 	"github.com/SisyphusSQ/mongo-overview-tool/internal/config"
-	"github.com/SisyphusSQ/mongo-overview-tool/internal/service"
 	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
+	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
 	"github.com/SisyphusSQ/mongo-overview-tool/utils"
 	"github.com/SisyphusSQ/mongo-overview-tool/vars"
 )
@@ -28,21 +29,21 @@ var overviewCmd = &cobra.Command{
 			return err
 		}
 
-		conn, err := mongo.NewMongoConn(overCfg.BuildUri)
+		ctx := context.Background()
+		client, err := mot.NewClient(ctx, sdkOptionsFromBase(&overCfg))
 		if err != nil {
-			l.Logger.Errorf("NewMongoConn failed, err: %v", err)
+			l.Logger.Errorf("mot.NewClient failed, err: %v", err)
 			return err
 		}
+		defer closeSDKClient(client)
 
-		ovSrv, err := service.NewOverviewSrv(context.Background(), &overCfg, conn)
+		result, err := client.Overview(ctx, mot.OverviewOptions{IncludeHosts: true})
 		if err != nil {
-			l.Logger.Errorf("NewOverviewSrv failed, err: %v", err)
+			l.Logger.Errorf("Overview failed, err: %v", err)
 			return err
 		}
-		defer ovSrv.Close()
-
-		if err = ovSrv.GetOverview(); err != nil {
-			l.Logger.Errorf("GetOverview failed, err: %v", err)
+		if err = clioutput.PrintOverview(os.Stdout, result, clioutput.OverviewPrintOptions{URI: overCfg.BuildUri}); err != nil {
+			l.Logger.Errorf("PrintOverview failed, err: %v", err)
 			return err
 		}
 		utils.PrintCost(start)

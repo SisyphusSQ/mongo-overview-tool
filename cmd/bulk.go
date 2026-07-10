@@ -3,14 +3,15 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/SisyphusSQ/mongo-overview-tool/internal/clioutput"
 	"github.com/SisyphusSQ/mongo-overview-tool/internal/config"
-	"github.com/SisyphusSQ/mongo-overview-tool/internal/service"
 	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
+	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
 	"github.com/SisyphusSQ/mongo-overview-tool/utils"
 	"github.com/SisyphusSQ/mongo-overview-tool/vars"
 )
@@ -62,20 +63,42 @@ func runBulkDelete() error {
 		return err
 	}
 
-	conn, err := mongo.NewMongoConn(bulkDeleteCfg.BuildUri)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopSignal := utils.SetupSignalCancel(cancel)
+	defer stopSignal()
+
+	client, err := mot.NewClient(ctx, sdkOptionsFromBase(&bulkDeleteCfg.BaseCfg))
 	if err != nil {
-		l.Logger.Errorf("NewMongoConn failed, err: %v", err)
+		l.Logger.Errorf("mot.NewClient failed, err: %v", err)
 		return err
 	}
+	defer closeSDKClient(client)
 
-	srv, err := service.NewBulkSrv(context.Background(), &bulkDeleteCfg, conn)
+	observer, err := clioutput.NewBulkObserver(os.Stdout, bulkDeleteCfg.Output, clioutput.BulkObserverOptions{
+		Action:     "bulk-delete",
+		Database:   bulkDeleteCfg.Database,
+		Collection: bulkDeleteCfg.Collection,
+		Filter:     bulkDeleteCfg.Filter,
+		BatchSize:  bulkDeleteCfg.BatchSize,
+		Pause:      time.Duration(bulkDeleteCfg.PauseMS) * time.Millisecond,
+		DryRun:     bulkDeleteCfg.DryRun,
+	})
 	if err != nil {
-		l.Logger.Errorf("NewBulkSrv failed, err: %v", err)
 		return err
 	}
-	defer srv.Close()
+	defer observer.Close()
 
-	if err := srv.Delete(); err != nil {
+	if _, err := client.BulkDelete(ctx, mot.BulkOptions{
+		Database:         bulkDeleteCfg.Database,
+		Collection:       bulkDeleteCfg.Collection,
+		Filter:           bulkDeleteCfg.Filter,
+		BatchSize:        bulkDeleteCfg.BatchSize,
+		Pause:            time.Duration(bulkDeleteCfg.PauseMS) * time.Millisecond,
+		DryRun:           bulkDeleteCfg.DryRun,
+		AllowEmptyFilter: true,
+		Observer:         observer,
+	}); err != nil {
 		l.Logger.Errorf("bulk-delete failed, err: %v", err)
 		return err
 	}
@@ -100,20 +123,46 @@ func runBulkUpdate() error {
 		return err
 	}
 
-	conn, err := mongo.NewMongoConn(bulkUpdateCfg.BuildUri)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopSignal := utils.SetupSignalCancel(cancel)
+	defer stopSignal()
+
+	client, err := mot.NewClient(ctx, sdkOptionsFromBase(&bulkUpdateCfg.BaseCfg))
 	if err != nil {
-		l.Logger.Errorf("NewMongoConn failed, err: %v", err)
+		l.Logger.Errorf("mot.NewClient failed, err: %v", err)
 		return err
 	}
+	defer closeSDKClient(client)
 
-	srv, err := service.NewBulkSrv(context.Background(), &bulkUpdateCfg, conn)
+	observer, err := clioutput.NewBulkObserver(os.Stdout, bulkUpdateCfg.Output, clioutput.BulkObserverOptions{
+		Action:     "bulk-update",
+		Database:   bulkUpdateCfg.Database,
+		Collection: bulkUpdateCfg.Collection,
+		Filter:     bulkUpdateCfg.Filter,
+		Update:     bulkUpdateCfg.Update,
+		BatchSize:  bulkUpdateCfg.BatchSize,
+		Pause:      time.Duration(bulkUpdateCfg.PauseMS) * time.Millisecond,
+		DryRun:     bulkUpdateCfg.DryRun,
+	})
 	if err != nil {
-		l.Logger.Errorf("NewBulkSrv failed, err: %v", err)
 		return err
 	}
-	defer srv.Close()
+	defer observer.Close()
 
-	if err := srv.Update(); err != nil {
+	if _, err := client.BulkUpdate(ctx, mot.BulkUpdateOptions{
+		BulkOptions: mot.BulkOptions{
+			Database:         bulkUpdateCfg.Database,
+			Collection:       bulkUpdateCfg.Collection,
+			Filter:           bulkUpdateCfg.Filter,
+			BatchSize:        bulkUpdateCfg.BatchSize,
+			Pause:            time.Duration(bulkUpdateCfg.PauseMS) * time.Millisecond,
+			DryRun:           bulkUpdateCfg.DryRun,
+			AllowEmptyFilter: true,
+			Observer:         observer,
+		},
+		Update: bulkUpdateCfg.Update,
+	}); err != nil {
 		l.Logger.Errorf("bulk-update failed, err: %v", err)
 		return err
 	}

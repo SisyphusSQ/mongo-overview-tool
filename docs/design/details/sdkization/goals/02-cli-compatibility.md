@@ -69,7 +69,7 @@ cmd flags -> internal/config -> mot.Options -> pkg/mot SDK -> internal/clioutput
 
 - `overview`：URI 脱敏、Hosts、repl、host、state、conn、qr、qw、ar、aw、size、memUsed、memRes、delay、uptime、version。
 - `coll-stats`：Database、TotalSize、ns、documents、avgObjSize、storageSize。
-- `check-shard`：在 `coll-stats` 基础上展示 `isSharded`，并保留 `--show-all` 语义。
+- `check-shard`：在 `coll-stats` 基础上展示 `isSharded`；默认展示尚未分片集合，`--show-all` 展示全部集合，指定 `--coll` 时展示目标集合。
 - `slowlog`：Database、Total、TimeFrame、ns、queryHash、op、count、maxMills、minMills、maxDocs、firstTs、lastTs。
 - `bulk-delete` / `bulk-update`：summary、dry-run 提示、进度、完成统计、可选文件日志。
 
