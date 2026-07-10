@@ -3,14 +3,15 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/SisyphusSQ/mongo-overview-tool/internal/clioutput"
 	"github.com/SisyphusSQ/mongo-overview-tool/internal/config"
-	"github.com/SisyphusSQ/mongo-overview-tool/internal/service"
 	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
+	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
 	"github.com/SisyphusSQ/mongo-overview-tool/utils"
 	"github.com/SisyphusSQ/mongo-overview-tool/vars"
 )
@@ -28,27 +29,41 @@ var shardCmd = &cobra.Command{
 			return err
 		}
 
-		conn, err := mongo.NewMongoConn(shCfg.BuildUri)
+		ctx := context.Background()
+		client, err := mot.NewClient(ctx, sdkOptionsFromBase(&shCfg.BaseCfg))
 		if err != nil {
-			l.Logger.Errorf("NewMongoConn failed, err: %v", err)
+			l.Logger.Errorf("mot.NewClient failed, err: %v", err)
 			return err
 		}
+		defer closeSDKClient(client)
 
-		shSrv, err := service.NewCollStatsSrv(context.Background(), &shCfg, conn, true)
+		statsOpts, showAll := checkShardStatsOptions(&shCfg)
+		result, err := client.CollectionStats(ctx, statsOpts)
 		if err != nil {
-			l.Logger.Errorf("NewCheckShardSrv failed, err: %v", err)
+			l.Logger.Errorf("CollectionStats failed, err: %v", err)
 			return err
 		}
-		defer shSrv.Close()
-
-		if err := shSrv.Stats(true); err != nil {
-			l.Logger.Errorf("ShColl failed, err: %v", err)
+		if err := clioutput.PrintCollectionStats(os.Stdout, result, clioutput.CollectionStatsPrintOptions{
+			URI:       shCfg.BuildUri,
+			ShardView: true,
+			ShowAll:   showAll,
+		}); err != nil {
+			l.Logger.Errorf("PrintCollectionStats failed, err: %v", err)
 			return err
 		}
 		utils.PrintCost(start)
 
 		return nil
 	},
+}
+
+func checkShardStatsOptions(cfg *config.StatsConfig) (mot.CollectionStatsOptions, bool) {
+	showAll := cfg.ShowAll || cfg.Collection != ""
+	return mot.CollectionStatsOptions{
+		Databases:             splitCSV(cfg.Database),
+		Collections:           splitCSV(cfg.Collection),
+		RequireShardedCluster: true,
+	}, showAll
 }
 
 func initCheckShard() {

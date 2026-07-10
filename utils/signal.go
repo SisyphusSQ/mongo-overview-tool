@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -42,4 +43,28 @@ func SetupSignalHandler() (*atomic.Bool, func()) {
 		close(done)
 	}
 	return cancelled, stop
+}
+
+// SetupSignalCancel 注册 SIGINT/SIGTERM 信号监听，并在收到信号时调用 cancel。
+func SetupSignalCancel(cancel context.CancelFunc) func() {
+	sigCh := make(chan os.Signal, 1)
+	done := make(chan struct{})
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		select {
+		case <-sigCh:
+			fmt.Println()
+			l.Logger.Warnf("Interrupt received, cancelling context...")
+			if cancel != nil {
+				cancel()
+			}
+		case <-done:
+		}
+	}()
+
+	return func() {
+		signal.Stop(sigCh)
+		close(done)
+	}
 }

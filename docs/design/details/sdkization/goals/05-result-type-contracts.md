@@ -165,6 +165,8 @@ type SlowlogSummaryItem struct {
 }
 ```
 
+兼容约定：MongoDB 3.4 等 profiler 不提供 `queryHash` 时，`QueryHash` 使用 `legacy:` 前缀的稳定兼容标识。该标识按 namespace、operation 和 plan summary 聚合，用于连接 Summary 与 Detail；它不等同于新版 MongoDB 的查询形状哈希，Detail 返回这一聚合组最新的匹配文档。
+
 Detail 返回原始文档和索引：
 
 ```go

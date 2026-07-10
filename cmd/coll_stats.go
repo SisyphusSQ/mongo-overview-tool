@@ -3,14 +3,15 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/SisyphusSQ/mongo-overview-tool/internal/clioutput"
 	"github.com/SisyphusSQ/mongo-overview-tool/internal/config"
-	"github.com/SisyphusSQ/mongo-overview-tool/internal/service"
 	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
+	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
 	"github.com/SisyphusSQ/mongo-overview-tool/utils"
 	"github.com/SisyphusSQ/mongo-overview-tool/vars"
 )
@@ -28,21 +29,24 @@ var collStatsCmd = &cobra.Command{
 			return err
 		}
 
-		conn, err := mongo.NewMongoConn(collCfg.BuildUri)
+		ctx := context.Background()
+		client, err := mot.NewClient(ctx, sdkOptionsFromBase(&collCfg.BaseCfg))
 		if err != nil {
-			l.Logger.Errorf("NewMongoConn failed, err: %v", err)
+			l.Logger.Errorf("mot.NewClient failed, err: %v", err)
 			return err
 		}
+		defer closeSDKClient(client)
 
-		collSrv, err := service.NewCollStatsSrv(context.Background(), &collCfg, conn, false)
+		result, err := client.CollectionStats(ctx, mot.CollectionStatsOptions{
+			Databases:   splitCSV(collCfg.Database),
+			Collections: splitCSV(collCfg.Collection),
+		})
 		if err != nil {
-			l.Logger.Errorf("NewCheckShardSrv failed, err: %v", err)
+			l.Logger.Errorf("CollectionStats failed, err: %v", err)
 			return err
 		}
-		defer collSrv.Close()
-
-		if err := collSrv.Stats(false); err != nil {
-			l.Logger.Errorf("collStatsCmd failed, err: %v", err)
+		if err := clioutput.PrintCollectionStats(os.Stdout, result, clioutput.CollectionStatsPrintOptions{URI: collCfg.BuildUri}); err != nil {
+			l.Logger.Errorf("PrintCollectionStats failed, err: %v", err)
 			return err
 		}
 		utils.PrintCost(start)

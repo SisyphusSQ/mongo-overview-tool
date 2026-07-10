@@ -354,7 +354,7 @@ Maintenance loop 的输出必须包含：
 固定规则：
 
 - `docs/test/RUNBOOK_TEMPLATE.md` 是 base harness 的通用测试 runbook 模板。
-- 具体测试文档默认放在 `docs/test/<domain>/`，同时保留可执行步骤和提交版结果摘要。
+- 具体测试文档默认放在 `docs/test/<domain>/`，保留可执行步骤和脱敏结果摘要；除 `RUNBOOK_TEMPLATE.md` 外默认由 `.gitignore` 忽略，原始结果放 `.agents/runs/`。
 - `当前验证结果` / `本次执行结果` 是提交版测试真相，后续同步或 closeout 不得删成空模板。
 
 ## provider-neutral 默认策略

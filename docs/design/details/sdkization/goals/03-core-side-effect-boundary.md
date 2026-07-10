@@ -84,6 +84,8 @@ type Logger interface {
 - SDK 不强依赖 `zap` 具体类型。
 - CLI 可以把现有 logger 适配为该接口。
 - 日志内容必须脱敏 URI 密码。
+- `pkg/mot` 的传递依赖不得初始化 CLI 全局 logger、终端颜色或 signal handler。
+- `pkg/mongo` 只返回带上下文的错误；URI 判断和脱敏等纯逻辑不通过混合 CLI 副作用的通用工具包复用。
 
 ## 输出迁移方案
 

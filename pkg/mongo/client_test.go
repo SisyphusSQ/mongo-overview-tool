@@ -1,24 +1,24 @@
+//go:build integration
+
 package mongo
 
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 
 	"go.mongodb.org/mongo-driver/bson"
-
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
 )
 
-func getClient() (*Conn, error) {
-	log.New(true)
+func getClient(t *testing.T) (*Conn, error) {
+	t.Helper()
+	uri := os.Getenv("MOT_TEST_MONGO_URI")
+	if uri == "" {
+		t.Skip("MOT_TEST_MONGO_URI is required for integration tests")
+	}
 
-	// repl
-	cli, err := NewMongoConn("mongodb://user:pwd@mongod:27017/admin")
-
-	// sharding
-	//cli, err := NewMongoConn("mongodb://user:pwd@mongos:27017/admin")
-
+	cli, err := NewMongoConn(uri)
 	if err != nil {
 		return nil, err
 	}
@@ -26,7 +26,7 @@ func getClient() (*Conn, error) {
 }
 
 func TestIsSharding(t *testing.T) {
-	cli, err := getClient()
+	cli, err := getClient(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestIsSharding(t *testing.T) {
 }
 
 func TestIsMaster(t *testing.T) {
-	cli, err := getClient()
+	cli, err := getClient(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestIsMaster(t *testing.T) {
 }
 
 func TestRsStatus(t *testing.T) {
-	cli, err := getClient()
+	cli, err := getClient(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestRsStatus(t *testing.T) {
 }
 
 func TestListShards(t *testing.T) {
-	cli, err := getClient()
+	cli, err := getClient(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestListShards(t *testing.T) {
 }
 
 func TestServerStatus(t *testing.T) {
-	cli, err := getClient()
+	cli, err := getClient(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestServerStatus(t *testing.T) {
 }
 
 func TestDBStatus(t *testing.T) {
-	cli, err := getClient()
+	cli, err := getClient(t)
 	if err != nil {
 		t.Fatal(err)
 	}

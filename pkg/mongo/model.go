@@ -233,15 +233,16 @@ type Optime struct {
 }
 
 type SlowlogView struct {
-	Ns        string    `json:"ns" bson:"ns"`
-	Op        string    `json:"op" bson:"op"`
-	QueryHash string    `json:"queryHash" bson:"queryHash"`
-	Cnt       int64     `json:"cnt" bson:"cnt"`
-	MaxMills  int64     `json:"maxMills" bson:"maxMills"`
-	MinMills  int64     `json:"minMills" bson:"minMills"`
-	MaxDocs   int64     `json:"maxDocs" bson:"maxDocs"`
-	MaxTs     time.Time `json:"maxTs" bson:"maxTs"`
-	MinTs     time.Time `json:"minTs" bson:"minTs"`
+	Ns          string    `json:"ns" bson:"ns"`
+	Op          string    `json:"op" bson:"op"`
+	QueryHash   string    `json:"queryHash" bson:"queryHash"`
+	PlanSummary string    `json:"planSummary" bson:"planSummary"`
+	Cnt         int64     `json:"cnt" bson:"cnt"`
+	MaxMills    int64     `json:"maxMills" bson:"maxMills"`
+	MinMills    int64     `json:"minMills" bson:"minMills"`
+	MaxDocs     int64     `json:"maxDocs" bson:"maxDocs"`
+	MaxTs       time.Time `json:"maxTs" bson:"maxTs"`
+	MinTs       time.Time `json:"minTs" bson:"minTs"`
 
 	DB string `json:"-" bson:"-"`
 }

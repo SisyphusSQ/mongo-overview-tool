@@ -1,0 +1,6 @@
+Hosts: 
+127.0.0.1
+
+repl  host                   state    conn  qr    qw    ar  aw  size      memUsed   memRes    delay  uptime         version   
+----  ----                   -----    ----  --    --    --  --  ----      -------   -------   -----  ------         -------   
+rs0   127.0.0.1:27017        PRIMARY  10    1     2     3   4   n/a       n/a       n/a       0s     2m0s           6.0       

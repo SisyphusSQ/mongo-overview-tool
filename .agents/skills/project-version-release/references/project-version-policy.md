@@ -7,15 +7,15 @@
 | 版本面 | 变化时机 |
 | --- | --- |
 | Issue log | 每个完成的 issue 都可以追加记录。 |
-| Changelog Unreleased | 已完成但尚未进入真实 release 的变更。 |
+| changeLog Unreleased | 已完成但尚未进入真实 release 的变更。 |
 | Release version | 只有发布 artifact 或正式归档 release notes 时变化。 |
 | Compatibility policy | 只有项目明确维护兼容性策略时变化。 |
 
 不要把这些版本面当成同一个字段的别名。
 
-## CHANGELOG 策略
+## changeLog 策略
 
-`CHANGELOG.md` 顶部应有 `## Unreleased` 段。
+`changeLog.md` 顶部应有 `## Unreleased` 段。
 
 issue 收口时，把简洁条目追加到 `Unreleased`：
 

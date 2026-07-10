@@ -40,15 +40,70 @@ cd mongo-overview-tool
 # 本机构建（产物在 bin/mot）
 make test
 
-# 交叉编译 Linux amd64（产物在 bin/mot.linux.amd64）+ 本机 Darwin arm64（产物在 bin/mot.darwin.arm64）
-make release
+# 发布构建：生成 Linux、macOS（Darwin）和 Windows 的 amd64、arm64 二进制
+make release VERSION=v2.0.0
 ```
 
-构建产物位于 `bin/` 目录下，可通过 `make deploy` 将其安装到 `/usr/local/bin/`。
+发布构建会生成以下文件；Windows 文件使用 `.exe` 后缀：
+
+- `bin/mot.linux.amd64`
+- `bin/mot.linux.arm64`
+- `bin/mot.darwin.amd64`
+- `bin/mot.darwin.arm64`
+- `bin/mot.windows.amd64.exe`
+- `bin/mot.windows.arm64.exe`
+
+构建产物位于 `bin/` 目录下，可通过 `make deploy` 将本机构建安装到 `/usr/local/bin/`。
 
 ## 连接配置
 
 该工具支持多种方式指定 MongoDB 连接信息。
+
+## Go SDK 用法
+
+除 CLI 外，本仓库也提供可嵌入 Go SDK：
+
+```go
+import "github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
+
+ctx := context.Background()
+client, err := mot.NewClient(ctx, mot.Options{
+    URI: "mongodb://root:password@127.0.0.1:27017/admin",
+})
+if err != nil {
+    return err
+}
+defer func() {
+    closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    _ = client.Close(closeCtx)
+}()
+
+overview, err := client.Overview(ctx, mot.OverviewOptions{IncludeHosts: true})
+```
+
+SDK 入口返回结构化 result，不返回 CLI 表格字符串；`MONGO_USER` / `MONGO_PASS` 等环境变量仍只由 CLI 层处理。更多示例见：
+
+- `examples/sdk/overview`
+- `examples/sdk/coll_stats`
+- `examples/sdk/bulk_delete_dry_run`
+
+真实 MongoDB 集成测试需显式启用：
+
+```bash
+MOT_TEST_MONGO_URI='mongodb://user:pass@127.0.0.1:27017/admin' \
+  go test -tags=integration ./pkg/mongo ./pkg/mot
+```
+
+SDK 只读 live E2E 使用独立的 host/port 环境变量，并从现有 `MONGO_USER` / `MONGO_PASS` 读取认证信息；测试覆盖 Overview、CollectionStats、SlowlogSummary 和 SlowlogDetail，不执行 bulk-delete / bulk-update：
+
+```bash
+MOT_TEST_MONGO_HOST='<host>' \
+MOT_TEST_MONGO_PORT='<port>' \
+MOT_TEST_EXPECT_CLUSTER='repl|sharding' \
+go test -tags=integration -count=1 -v \
+  -run '^TestLiveSDKReadOnlyE2E$' ./pkg/mot
+```
 
 ### 1. 命令行参数（推荐）
 
@@ -122,13 +177,13 @@ mot coll-stats --database mydb
 检查集合是否配置了分片。
 
 **参数:**
-- `--show-all`: 是否显示所有集合（默认只显示已分片的集合）。
+- `--show-all`: 是否显示所有集合（默认只显示尚未分片的集合）。
 - `--database`: 指定数据库。
 - `--coll`: 指定集合。
 
 **使用示例:**
 ```bash
-# 检查 mydb 库中哪些集合已分片
+# 检查 mydb 库中哪些集合尚未分片
 mot check-shard --database mydb
 
 # 显示所有集合的分片状态
@@ -149,9 +204,11 @@ mot check-shard --show-all
 # 获取慢日志概览，按出现次数排序
 mot slowlog --sort cnt
 
-# 查看特定 Query Hash 的慢日志详情
-mot slowlog --hash xxxxxxxx
+# 查看特定 Query Hash（或低版本 legacy 标识）的慢日志详情
+mot slowlog --db mydb --hash xxxxxxxx
 ```
+
+MongoDB 3.4 等旧版本的 `system.profile` 不提供 `queryHash`。此时概览会根据 namespace、operation 和 plan summary 生成 `legacy:` 前缀的稳定标识；该标识可直接传给 `--hash` 查看这一聚合组中最新的详情记录。它是兼容标识，不等同于新版 MongoDB 的查询形状哈希。
 
 ### 5. 批量删除 (`bulk-delete`)
 
@@ -259,7 +316,7 @@ URI: mongodb://root:***@10.0.0.1:27017/admin
 
 | 命令 | 并发数 | 说明 |
 | :--- | :--- | :--- |
-| `coll-stats` / `check-shard` | 50 | 每个数据库内，集合级别的统计查询并发上限 |
+| `coll-stats` / `check-shard` | 20 | 每个数据库内，集合级别的统计查询并发上限 |
 | `slowlog` | 5 | 每个节点内，数据库级别的 `system.profile` 聚合并发上限 |
 
 并发通过 `errgroup.SetLimit()` 控制，超出上限的任务会自动排队等待。
@@ -281,15 +338,10 @@ mongo-overview-tool/
 │   └── bulk.go                      # bulk-delete / bulk-update 子命令
 ├── internal/
 │   ├── config/                      # 配置定义 & 预检逻辑
-│   ├── model/                       # 数据模型（overview 统计等）
-│   └── service/                     # 业务逻辑层
-│       ├── overview_srv.go          # 集群概览
-│       ├── coll_stats_srv.go        # 集合统计
-│       ├── slowlog_srv.go           # 慢日志分析
-│       ├── bulk_srv.go              # 批量删除/更新
-│       └── print_srv.go             # 格式化输出（表格、颜色）
+│   └── clioutput/                   # CLI 输出适配（表格、颜色、进度、文件日志）
 ├── pkg/
 │   ├── log/                         # 日志（基于 Zap）
+│   ├── mot/                         # 可嵌入 Go SDK facade
 │   ├── mongo/                       # MongoDB 连接、查询封装
 │   └── progress/                    # 进度条
 ├── utils/

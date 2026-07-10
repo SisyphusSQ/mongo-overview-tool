@@ -1,3 +1,16 @@
+## Unreleased
+<!-- 普通 issue 新增条目只写在本 Unreleased 段；不要写入下面已归档版本段。 -->
+
+### v2.0.0(20260710)
+#### feature:
+1. 新增可嵌入的 Go SDK pkg/mot，支持连接管理、集群概览、集合统计、慢日志分析和批量维护，并返回结构化结果。
+2. CLI 改为调用 SDK，保留主要命令和 flag；新增 SDK 示例与默认离线单测。
+3. 支持 MongoDB 3.4 等缺少 queryHash 的慢日志场景，以 legacy: 兼容标识衔接概览与详情查询。
+#### optimization:
+1. 连接、派生节点连接和 cursor 使用调用方 context 与有界清理，并补充 URI 脱敏和可识别的取消或部分结果错误。
+#### note:
+1. GitHub Release 提供 Linux、Darwin（macOS）和 Windows 的 amd64、arm64 原始二进制文件。
+
 ## v1.1.0(20260214)
 #### feature:
 1. 支持 Mongo Shell 查询语法：`--filter` 与 `--update` 参数支持使用 `ISODate()`, `ObjectId()`, 无引号键名, 单引号字符串等 Shell 风格语法，自动转换为 Extended JSON，提升 CLI 易用性
