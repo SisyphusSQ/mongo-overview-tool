@@ -1,0 +1,32 @@
+=== ops ===
+Current Operations (repl, visibility=all_users, source=aggregation)
+HOST	NAMESPACE	OP	DURATION	LOCK	FLOW
+node	db.c	query	3s	false	false
+Findings: none
+Collector Status:
+- current_operations	supported	cluster	
+=== hotspot ===
+MongoDB Hotspot (sharding, duration=2s)
+SHARD	HOST	NAMESPACE	READ/S	WRITE/S	TIME_US
+s0	node	db.c	1.50	0.50	40
+Findings: none
+Collector Status:
+- hotspot	supported	s0/node	
+=== index ===
+MongoDB Index Audit
+NAMESPACE	INDEX	SHARD	HOST	OPS	SINCE	SIZE
+db.c	a_1	s0	node	0	2026-07-01T00:00:00Z	20
+Findings: none
+Collector Status:
+- index_usage	supported	db.c	
+=== capacity ===
+MongoDB Capacity (schema=1, topology=repl)
+NAMESPACE	COUNT	DATA	STORAGE	INDEX	FREE
+db.c	2	100	80	20	unavailable
+Findings: none
+Collector Status:
+- collection_capacity	supported	db.c	
+=== diff ===
+MongoDB Capacity Diff (duration=24h0m0s)
+NAMESPACE	STATE	COUNT_DELTA	DATA_DELTA	STORAGE_DELTA	INDEX_DELTA
+db.c	existing	5	unavailable	unavailable	unavailable

@@ -14,8 +14,9 @@
 ```text
 mot index-audit [connection flags]
   --format table|json
-  --database <db1,db2>
+  (--database <db1,db2> | --all-databases)
   --collection <c1,c2>
+  --checks <csv>
   --min-observation 168h
   --max-collections 500
   --concurrency <n>
@@ -23,12 +24,16 @@ mot index-audit [connection flags]
 
 默认观察窗口为 7 天。该窗口不是等待时间，而是 `$indexStats.accesses.since` 到采集时间的最短跨度。
 
+`consistency` 加入默认 checks；显式 `--checks consistency` 时只执行跨 shard 索引一致性检查。`--database` 与 `--all-databases` 必须二选一，后者默认排除系统库。
+
 ## `index-audit` SDK
 
 ```go
 type IndexAuditOptions struct {
     Databases         []string
+    AllDatabases      bool
     Collections       []string
+    Checks            []IndexAuditCheck
     IncludeSystemDB   bool
     MinObservation    time.Duration
     MaxCollections    int
@@ -85,8 +90,10 @@ TTL、unique、sparse、partial、hidden、wildcard、text、geo、hashed 或 sh
 ### 4. 构建中与跨 shard 差异
 
 - `building=true` 或 collection stats 中存在 index build 时输出 `index.build_in_progress` info。
-- 一期只比较从各 shard / node 读取到的 index spec；发现同名 spec 不一致或缺失时输出 warning。
-- MongoDB 7+ 的官方 `checkMetadataConsistency(checkIndexes=true)` 留到高级 `metadata-check`，不在一期自动执行。
+- `consistency` 默认比较所有 expected shards；expected shards 不得从已返回的索引 observation 反推。
+- MongoDB 3.4–4.2.3 使用派生 shard 连接和 `listIndexes`；4.2.4–6.x 优先 `$indexStats`；7.x 优先官方 `checkMetadataConsistency(checkIndexes=true)`。
+- legacy 差异需要对相关 namespace/shard 二次读取后再生成 warning；构建中或观察结果变化时标记 `inconclusive`。
+- 具体 CLI、SDK、状态、finding、fallback、脱敏和验收规则见 [08 分片集群全库索引一致性审计](08-sharded-index-consistency-audit.md)。
 
 ## `capacity` CLI
 
@@ -199,3 +206,4 @@ diff 输出：
 - [MongoDB `$indexStats`](https://www.mongodb.com/docs/manual/reference/operator/aggregation/indexstats/)
 - [MongoDB `dbStats`](https://www.mongodb.com/docs/manual/reference/command/dbstats/)
 - [MongoDB `$collStats`](https://www.mongodb.com/docs/manual/reference/operator/aggregation/collstats/)
+- [分片集群全库索引一致性审计](08-sharded-index-consistency-audit.md)

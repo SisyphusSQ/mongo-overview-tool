@@ -1,0 +1,443 @@
+package mot
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"sync"
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
+
+	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
+)
+
+const (
+	defaultIndexObservation = 7 * 24 * time.Hour
+	defaultMaxCollections   = 500
+)
+
+type IndexAuditCheck string
+
+const (
+	IndexCheckUnused      IndexAuditCheck = "unused"
+	IndexCheckRedundant   IndexAuditCheck = "redundant"
+	IndexCheckSpace       IndexAuditCheck = "space"
+	IndexCheckBuilding    IndexAuditCheck = "building"
+	IndexCheckConsistency IndexAuditCheck = "consistency"
+)
+
+type IndexAuditOptions struct {
+	Databases       []string
+	AllDatabases    bool
+	Collections     []string
+	Checks          []IndexAuditCheck
+	IncludeSystemDB bool
+	MinObservation  time.Duration
+	MaxCollections  int
+	Concurrency     int
+}
+
+type IndexKeyField struct {
+	Field string `json:"field"`
+	Order string `json:"order"`
+}
+
+type IndexObservation struct {
+	Name                          string          `json:"name"`
+	Key                           []IndexKeyField `json:"key"`
+	Host                          string          `json:"host"`
+	Shard                         string          `json:"shard,omitempty"`
+	Ops                           int64           `json:"ops"`
+	Since                         time.Time       `json:"since"`
+	SizeBytes                     *int64          `json:"sizeBytes,omitempty"`
+	Unique                        bool            `json:"unique"`
+	Sparse                        bool            `json:"sparse"`
+	Hidden                        bool            `json:"hidden"`
+	Partial                       bool            `json:"partial"`
+	WildcardProjection            bool            `json:"wildcardProjection"`
+	CollationFingerprint          string          `json:"collationFingerprint,omitempty"`
+	PartialFilterFingerprint      string          `json:"partialFilterFingerprint,omitempty"`
+	WildcardProjectionFingerprint string          `json:"wildcardProjectionFingerprint,omitempty"`
+	ExpireAfterSeconds            *int64          `json:"expireAfterSeconds,omitempty"`
+	SpecialType                   string          `json:"specialType,omitempty"`
+	Building                      bool            `json:"building"`
+}
+
+type CollectionIndexAudit struct {
+	Namespace        string              `json:"namespace"`
+	DataSizeBytes    *int64              `json:"dataSizeBytes,omitempty"`
+	IndexSizeBytes   *int64              `json:"indexSizeBytes,omitempty"`
+	IndexToDataRatio *float64            `json:"indexToDataRatio,omitempty"`
+	Indexes          []IndexObservation  `json:"indexes"`
+	Findings         []DiagnosticFinding `json:"findings"`
+}
+
+type IndexAuditResult struct {
+	CollectedAt       time.Time              `json:"collectedAt"`
+	Collections       []CollectionIndexAudit `json:"collections"`
+	Findings          []DiagnosticFinding    `json:"findings"`
+	CollectorStatuses []CollectorStatus      `json:"collectorStatuses"`
+}
+
+type indexCollectionRef struct{ Database, Collection string }
+
+// IndexAudit 执行通用索引使用、定义和空间审计；跨 shard 一致性由 TOO-304 实现。
+func (c *Client) IndexAudit(ctx context.Context, opts IndexAuditOptions) (result *IndexAuditResult, err error) {
+	opts, err = normalizeIndexAuditOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.requireMemberConnectionURI(); err != nil {
+		return nil, err
+	}
+	defer func() { err = mapContextError(err) }()
+	cluster, err := pkgmongo.DetectCluster(ctx, c.conn)
+	if err != nil {
+		return nil, err
+	}
+	result = &IndexAuditResult{CollectedAt: time.Now().UTC()}
+	if gate, allowed := diagnosticCapabilityGate("index_usage", convertClusterType(cluster.Type), cluster.MaxWireVersion, true); !allowed {
+		result.CollectorStatuses = []CollectorStatus{gate}
+		return result, nil
+	}
+	refs, err := c.indexCollectionRefs(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	if len(refs) > opts.MaxCollections {
+		return nil, invalidOptions("selected %d collections, exceeds max %d", len(refs), opts.MaxCollections)
+	}
+	targets, _, discoveryErrors := c.discoverHotspotTargets(ctx, cluster.Type)
+	if includesIndexCheck(opts.Checks, IndexCheckConsistency) {
+		result.CollectorStatuses = append(result.CollectorStatuses, CollectorStatus{
+			Name: "index_consistency", State: CapabilitySkipped, Scope: FindingScope{Type: ScopeCluster},
+			ReasonCode: "related_issue_too_304", Message: "跨 shard 索引一致性由 TOO-304 实现",
+		})
+	}
+	var mu sync.Mutex
+	var collectorErrors []error
+	group, groupCtx := errgroup.WithContext(ctx)
+	limit := semaphore.NewWeighted(int64(opts.Concurrency))
+	for _, ref := range refs {
+		if acquireErr := acquireDiagnosticSlot(groupCtx, limit); acquireErr != nil {
+			mu.Lock()
+			collectorErrors = append(collectorErrors, acquireErr)
+			mu.Unlock()
+			break
+		}
+		ref := ref
+		group.Go(func() error {
+			defer limit.Release(1)
+			collection, statuses, collectErrors := c.collectIndexAuditCollection(groupCtx, ref, targets, opts, result.CollectedAt, cluster.Type == pkgmongo.ClusterRepl)
+			mu.Lock()
+			result.Collections = append(result.Collections, collection)
+			result.Findings = append(result.Findings, collection.Findings...)
+			result.CollectorStatuses = append(result.CollectorStatuses, statuses...)
+			collectorErrors = append(collectorErrors, collectErrors...)
+			mu.Unlock()
+			return nil
+		})
+	}
+	_ = group.Wait()
+	collectorErrors = append(collectorErrors, discoveryErrors...)
+	sort.SliceStable(result.Collections, func(i, j int) bool { return result.Collections[i].Namespace < result.Collections[j].Namespace })
+	sanitizeAndSortFindings(result.Findings)
+	sortCollectorStatuses(result.CollectorStatuses)
+	if len(collectorErrors) > 0 {
+		if len(result.Collections) == 0 {
+			return result, errors.Join(collectorErrors...)
+		}
+		return result, newDiagnosticPartialError("index-audit", result, errors.Join(collectorErrors...))
+	}
+	return result, nil
+}
+
+func normalizeIndexAuditOptions(opts IndexAuditOptions) (IndexAuditOptions, error) {
+	if opts.MinObservation < 0 || opts.MaxCollections < 0 || opts.Concurrency < 0 {
+		return IndexAuditOptions{}, invalidOptions("duration, max collections and concurrency must not be negative")
+	}
+	if !opts.AllDatabases && len(opts.Databases) == 0 {
+		return IndexAuditOptions{}, invalidOptions("databases or all databases is required")
+	}
+	if opts.AllDatabases && len(opts.Databases) > 0 {
+		return IndexAuditOptions{}, invalidOptions("databases and all databases are mutually exclusive")
+	}
+	if opts.MinObservation == 0 {
+		opts.MinObservation = defaultIndexObservation
+	}
+	if opts.MaxCollections == 0 {
+		opts.MaxCollections = defaultMaxCollections
+	}
+	if opts.Concurrency == 0 {
+		opts.Concurrency = defaultOverviewNodeConcurrency
+	}
+	if len(opts.Checks) == 0 {
+		opts.Checks = []IndexAuditCheck{IndexCheckUnused, IndexCheckRedundant, IndexCheckSpace, IndexCheckBuilding, IndexCheckConsistency}
+	}
+	for _, check := range opts.Checks {
+		switch check {
+		case IndexCheckUnused, IndexCheckRedundant, IndexCheckSpace, IndexCheckBuilding, IndexCheckConsistency:
+		default:
+			return IndexAuditOptions{}, invalidOptions("unknown index audit check %q", check)
+		}
+	}
+	return opts, nil
+}
+
+func (c *Client) indexCollectionRefs(ctx context.Context, opts IndexAuditOptions) ([]indexCollectionRef, error) {
+	dbs, err := c.conn.Client.ListDatabaseNames(ctx, bson.D{})
+	if err != nil {
+		return nil, err
+	}
+	var refs []indexCollectionRef
+	for _, database := range dbs {
+		if !opts.IncludeSystemDB && isSystemDatabase(database) {
+			continue
+		}
+		if !opts.AllDatabases && !stringIncluded(opts.Databases, database) {
+			continue
+		}
+		cursor, listErr := c.conn.Client.Database(database).ListCollections(ctx, bson.D{})
+		if listErr != nil {
+			return nil, listErr
+		}
+		var metadata struct {
+			Name string `bson:"name"`
+			Type string `bson:"type"`
+		}
+		for cursor.Next(ctx) {
+			metadata = struct {
+				Name string `bson:"name"`
+				Type string `bson:"type"`
+			}{}
+			if decodeErr := cursor.Decode(&metadata); decodeErr != nil {
+				closeCtx, cancel := cleanupContext(ctx)
+				_ = cursor.Close(closeCtx)
+				cancel()
+				return nil, decodeErr
+			}
+			if metadata.Type == "view" {
+				continue
+			}
+			collection := metadata.Name
+			if len(opts.Collections) > 0 && !stringIncluded(opts.Collections, collection) {
+				continue
+			}
+			refs = append(refs, indexCollectionRef{database, collection})
+			if opts.MaxCollections > 0 && len(refs) > opts.MaxCollections {
+				closeCtx, cancel := cleanupContext(ctx)
+				_ = cursor.Close(closeCtx)
+				cancel()
+				return nil, invalidOptions("selected collections exceed max %d", opts.MaxCollections)
+			}
+		}
+		if cursorErr := cursor.Err(); cursorErr != nil {
+			closeCtx, cancel := cleanupContext(ctx)
+			_ = cursor.Close(closeCtx)
+			cancel()
+			return nil, cursorErr
+		}
+		closeCtx, cancel := cleanupContext(ctx)
+		_ = cursor.Close(closeCtx)
+		cancel()
+	}
+	sort.SliceStable(refs, func(i, j int) bool {
+		return refs[i].Database+"."+refs[i].Collection < refs[j].Database+"."+refs[j].Collection
+	})
+	return refs, nil
+}
+
+func (c *Client) collectIndexAuditCollection(ctx context.Context, ref indexCollectionRef, targets []hotspotTarget, opts IndexAuditOptions, now time.Time, ownershipKnown bool) (CollectionIndexAudit, []CollectorStatus, []error) {
+	namespace := ref.Database + "." + ref.Collection
+	result := CollectionIndexAudit{Namespace: namespace}
+	var statuses []CollectorStatus
+	var collectorErrors []error
+	capacity, capacityErr := c.conn.CollectionCapacity(ctx, ref.Database, ref.Collection, false, 5*time.Second)
+	if capacityErr == nil {
+		result.DataSizeBytes, result.IndexSizeBytes = capacity.DataSizeBytes, capacity.TotalIndexSizeBytes
+		if result.DataSizeBytes != nil && *result.DataSizeBytes > 0 && result.IndexSizeBytes != nil {
+			ratio := float64(*result.IndexSizeBytes) / float64(*result.DataSizeBytes)
+			result.IndexToDataRatio = &ratio
+		}
+	} else {
+		collectorErrors = append(collectorErrors, capacityErr)
+	}
+	for _, target := range targets {
+		scope := FindingScope{Type: ScopeNamespace, ReplicaSet: target.ReplicaSet, Shard: target.Shard, Node: target.Address, Database: ref.Database, Namespace: namespace}
+		conn, connectErr := c.connectAddress(ctx, target.Address, derivedConnectionOptions{Direct: boolPointer(true)})
+		if connectErr != nil {
+			collectorErrors = append(collectorErrors, connectErr)
+			statuses = append(statuses, failedCollectorStatus("index_usage", scope, connectErr))
+			continue
+		}
+		stats, statsErr := conn.IndexStats(ctx, ref.Database, ref.Collection, 5*time.Second)
+		c.closeDerivedConnection(ctx, conn)
+		if statsErr != nil {
+			if isUnsupportedDiagnosticError(statsErr) {
+				statuses = append(statuses, CollectorStatus{Name: "index_usage", State: CapabilityUnsupported, Scope: scope, ReasonCode: "unsupported_version", Message: "$indexStats 在当前服务器上不可用"})
+			} else if isUnauthorizedError(statsErr) {
+				statuses = append(statuses, failedCollectorStatus("index_usage", scope, statsErr))
+			} else {
+				collectorErrors = append(collectorErrors, statsErr)
+				statuses = append(statuses, failedCollectorStatus("index_usage", scope, statsErr))
+			}
+			continue
+		}
+		statuses = append(statuses, CollectorStatus{Name: "index_usage", State: CapabilitySupported, Scope: scope})
+		for _, stat := range stats {
+			observation := indexObservationFromMongo(stat, target.Shard)
+			if capacity.IndexSizes != nil {
+				if size, ok := capacity.IndexSizes[stat.Name]; ok {
+					observation.SizeBytes = &size
+				}
+			}
+			observation.Building = stringIncluded(capacity.IndexBuilds, stat.Name)
+			result.Indexes = append(result.Indexes, observation)
+		}
+	}
+	result.Findings = evaluateIndexAuditCollection(result, len(targets), opts, now, ownershipKnown)
+	sort.SliceStable(result.Indexes, func(i, j int) bool {
+		if result.Indexes[i].Name != result.Indexes[j].Name {
+			return result.Indexes[i].Name < result.Indexes[j].Name
+		}
+		if result.Indexes[i].Shard != result.Indexes[j].Shard {
+			return result.Indexes[i].Shard < result.Indexes[j].Shard
+		}
+		return result.Indexes[i].Host < result.Indexes[j].Host
+	})
+	return result, statuses, collectorErrors
+}
+
+func evaluateIndexAuditCollection(collection CollectionIndexAudit, expectedNodes int, opts IndexAuditOptions, now time.Time, ownershipKnown ...bool) []DiagnosticFinding {
+	canDetermineOwnership := len(ownershipKnown) == 0 || ownershipKnown[0]
+	byName := make(map[string][]IndexObservation)
+	for _, observation := range collection.Indexes {
+		byName[observation.Name] = append(byName[observation.Name], observation)
+	}
+	var findings []DiagnosticFinding
+	if includesIndexCheck(opts.Checks, IndexCheckUnused) {
+		for name, observations := range byName {
+			if name == "_id_" {
+				continue
+			}
+			complete, unused := canDetermineOwnership && len(observations) == expectedNodes && expectedNodes > 0, true
+			for _, observation := range observations {
+				if observation.Ops != 0 {
+					unused = false
+				}
+				if observation.Since.IsZero() || now.Sub(observation.Since) < opts.MinObservation || observation.Building {
+					complete = false
+				}
+			}
+			code, severity, summary := "index.unused_candidate", SeverityWarning, "索引在完整观察窗口内未记录使用，需结合查询模式人工复核"
+			if !complete {
+				code, severity, summary = "index.usage_inconclusive", SeverityInfo, "索引使用证据不完整，不能判定为长期零使用"
+			}
+			if unused || !complete {
+				evidence := map[string]any{"indexName": name, "observedNodes": len(observations), "expectedNodes": expectedNodes}
+				if !canDetermineOwnership {
+					evidence["ownershipCoverage"] = "unknown"
+				}
+				if len(observations) > 0 {
+					evidence["unique"] = observations[0].Unique
+					evidence["sparse"] = observations[0].Sparse
+					evidence["partial"] = observations[0].Partial
+					evidence["hidden"] = observations[0].Hidden
+					evidence["specialType"] = observations[0].SpecialType
+					evidence["ttl"] = observations[0].ExpireAfterSeconds != nil
+				}
+				findings = append(findings, DiagnosticFinding{Code: code, Severity: severity, Scope: FindingScope{Type: ScopeNamespace, Namespace: collection.Namespace}, Summary: summary, Evidence: evidence})
+			}
+		}
+	}
+	if includesIndexCheck(opts.Checks, IndexCheckRedundant) {
+		definitions := firstIndexDefinitions(byName)
+		for i := range definitions {
+			for j := range definitions {
+				if i == j || !compatibleIndexProperties(definitions[i], definitions[j]) || !keyPrefix(definitions[i].Key, definitions[j].Key) {
+					continue
+				}
+				findings = append(findings, DiagnosticFinding{Code: "index.redundant_prefix_candidate", Severity: SeverityInfo, Scope: FindingScope{Type: ScopeNamespace, Namespace: collection.Namespace}, Summary: "索引 key pattern 是另一索引的前缀，需结合慢日志和查询模式人工复核", Evidence: map[string]any{"indexName": definitions[i].Name, "coveringIndexName": definitions[j].Name}})
+			}
+		}
+	}
+	if includesIndexCheck(opts.Checks, IndexCheckBuilding) {
+		for name, observations := range byName {
+			for _, observation := range observations {
+				if observation.Building {
+					findings = append(findings, DiagnosticFinding{Code: "index.build_in_progress", Severity: SeverityInfo, Scope: FindingScope{Type: ScopeNamespace, Namespace: collection.Namespace}, Summary: "索引正在构建，使用结论暂不稳定", Evidence: map[string]any{"indexName": name}})
+					break
+				}
+			}
+		}
+	}
+	if includesIndexCheck(opts.Checks, IndexCheckSpace) && collection.IndexToDataRatio != nil {
+		findings = append(findings, DiagnosticFinding{Code: "index.space_ratio", Severity: SeverityInfo, Scope: FindingScope{Type: ScopeNamespace, Namespace: collection.Namespace}, Summary: "索引与逻辑数据空间占比，仅作为容量复核证据", Evidence: map[string]any{"indexToDataRatio": *collection.IndexToDataRatio}})
+	}
+	sanitizeAndSortFindings(findings)
+	return findings
+}
+
+func indexObservationFromMongo(stat pkgmongo.IndexStatSnapshot, shard string) IndexObservation {
+	key := make([]IndexKeyField, 0, len(stat.Key))
+	for _, field := range stat.Key {
+		key = append(key, IndexKeyField{Field: field.Key, Order: fmt.Sprint(field.Value)})
+	}
+	return IndexObservation{Name: stat.Name, Key: key, Host: stat.Host, Shard: shard, Ops: stat.Ops, Since: stat.Since, Unique: stat.Unique, Sparse: stat.Sparse, Hidden: stat.Hidden, Partial: stat.Partial, WildcardProjection: stat.WildcardProjection, CollationFingerprint: stat.CollationFingerprint, PartialFilterFingerprint: stat.PartialFilterFingerprint, WildcardProjectionFingerprint: stat.WildcardProjectionFingerprint, ExpireAfterSeconds: stat.ExpireAfterSeconds, SpecialType: stat.SpecialType}
+}
+
+func firstIndexDefinitions(byName map[string][]IndexObservation) []IndexObservation {
+	result := make([]IndexObservation, 0, len(byName))
+	for _, values := range byName {
+		if len(values) > 0 {
+			result = append(result, values[0])
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result
+}
+
+func compatibleIndexProperties(a, b IndexObservation) bool {
+	return a.Unique == b.Unique && a.Sparse == b.Sparse && a.Hidden == b.Hidden &&
+		a.PartialFilterFingerprint == b.PartialFilterFingerprint &&
+		a.WildcardProjectionFingerprint == b.WildcardProjectionFingerprint &&
+		a.CollationFingerprint == b.CollationFingerprint &&
+		equalOptionalInt64(a.ExpireAfterSeconds, b.ExpireAfterSeconds)
+}
+
+func keyPrefix(a, b []IndexKeyField) bool {
+	if len(a) >= len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func equalOptionalInt64(a, b *int64) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
+}
+func includesIndexCheck(checks []IndexAuditCheck, target IndexAuditCheck) bool {
+	for _, check := range checks {
+		if check == target {
+			return true
+		}
+	}
+	return false
+}
+func stringIncluded(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+func isSystemDatabase(database string) bool { return stringIncluded(systemDatabases, database) }

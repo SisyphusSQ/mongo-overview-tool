@@ -11,6 +11,7 @@ import (
 )
 
 const sdkClientCloseTimeout = 5 * time.Second
+const sdkClientCloseWarning = "failed to close SDK client; detail suppressed"
 
 func sdkOptionsFromBase(cfg *config.BaseCfg) mot.Options {
 	return mot.Options{
@@ -27,7 +28,7 @@ func closeSDKClient(client *mot.Client) {
 	ctx, cancel := context.WithTimeout(context.Background(), sdkClientCloseTimeout)
 	defer cancel()
 	if err := client.Close(ctx); err != nil {
-		l.Logger.Warnf("failed to close SDK client: %v", err)
+		l.Logger.Warnf(sdkClientCloseWarning)
 	}
 }
 

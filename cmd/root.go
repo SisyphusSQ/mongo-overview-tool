@@ -38,6 +38,7 @@ func initAll() {
 	initSlowlogCmd()
 	initBulkDelete()
 	initBulkUpdate()
+	initDiagnostics()
 }
 
 func Execute() {

@@ -8,6 +8,8 @@
 - **集合统计 (`coll-stats`)**: 分析集合大小、索引大小、文档数量等。
 - **分片检查 (`check-shard`)**: 检查集合是否已分片。
 - **慢日志分析 (`slowlog`)**: 聚合分析慢查询日志，支持按执行次数、最大耗时等排序。
+- **诊断巡检 (`doctor` / `ops` / `hotspot`)**: 以结构化 finding 和 collector status 展示健康风险、活跃操作与短周期热点。
+- **索引与容量审计 (`index-audit` / `capacity`)**: 给出通用索引复核候选、脱敏容量快照和纯离线差异，不自动执行索引或存储变更。
 - **批量操作 (`bulk-delete` / `bulk-update`)**: 支持流控的批量删除和更新操作，减少对线上业务的影响。
 
 ## Harness 控制面
@@ -104,6 +106,8 @@ MOT_TEST_EXPECT_CLUSTER='repl|sharding' \
 go test -tags=integration -count=1 -v \
   -run '^TestLiveSDKReadOnlyE2E$' ./pkg/mot
 ```
+
+该 live E2E 还覆盖 `Doctor`、`CurrentOperations`、`Hotspot`、通用 `IndexAudit`、`Capacity` 和增强后的 slowlog insight。它会读取真实副本集或分片数据节点的诊断统计，但不会创建数据、修改 Profiler、变更索引或执行维护命令。
 
 ### 1. 命令行参数（推荐）
 
@@ -210,7 +214,39 @@ mot slowlog --db mydb --hash xxxxxxxx
 
 MongoDB 3.4 等旧版本的 `system.profile` 不提供 `queryHash`。此时概览会根据 namespace、operation 和 plan summary 生成 `legacy:` 前缀的稳定标识；该标识可直接传给 `--hash` 查看这一聚合组中最新的详情记录。它是兼容标识，不等同于新版 MongoDB 的查询形状哈希。
 
-### 5. 批量删除 (`bulk-delete`)
+### 5. MongoDB 诊断与巡检
+
+新增诊断命令默认只读，并提供 `--format table|json` 与 `--timeout`。`unsupported`、`unauthorized`、`skipped`、`failed` 会作为 collector status 保留，不会被表格输出吞掉。
+
+```bash
+# 健康巡检；oplog window 需要显式启用
+mot doctor --uri '<mongodb-uri>' --oplog-window --format json
+
+# 服务端过滤并脱敏活跃操作；不输出 command/filter/user/session
+mot ops --uri '<mongodb-uri>' --min-duration 2s --limit 100
+
+# 默认使用 10 秒双快照，按实际间隔计算 namespace rate
+mot hotspot --uri '<mongodb-uri>' --database app --top 10
+
+# database 与 all-databases 二选一；只给人工复核候选
+mot index-audit --uri '<mongodb-uri>' --database app \
+  --checks unused,redundant,space,building
+
+# free storage 是显式高成本 opt-in；snapshot 只包含脱敏结构化结果
+mot capacity --uri '<mongodb-uri>' --database app \
+  --free-storage --snapshot ./capacity-after.json
+
+# 纯离线比较，不连接 MongoDB
+mot capacity diff ./capacity-before.json ./capacity-after.json
+```
+
+说明：
+
+- `index-audit` 的跨 shard 索引一致性检查由独立任务承接；当前命令只提供公共审计骨架与长期零使用、前缀、空间、构建中检查。
+- `capacity` 中 `dataSize` 是逻辑未压缩数据量，`storageSize` 是集合已分配存储且不含索引；free storage 表示存储引擎可复用空间，不代表操作系统会立即回收。
+- SDK 诊断方法可能返回 result 与 `*mot.DiagnosticPartialError`；既有 bulk `*mot.PartialError` 保持源码兼容，诊断已有有效证据也不会因单个节点或 collector 失败而丢失。
+
+### 6. 批量删除 (`bulk-delete`)
 
 分批次删除数据，支持流控（暂停时间），避免一次性删除大量数据导致数据库负载过高。
 
@@ -244,7 +280,7 @@ mot bulk-delete -t 10.0.0.1 -P 27017 \
   -b 500 --pause-ms 200
 ```
 
-### 6. 批量更新 (`bulk-update`)
+### 7. 批量更新 (`bulk-update`)
 
 分批次更新数据，同样支持流控。
 

@@ -1,0 +1,12 @@
+=== partial ===
+MongoDB Doctor (sharding)
+Findings:
+- WARNING	operation.queue_sustained	s0/n1	两个快照均观察到操作排队
+Collector Status:
+- server_status	supported	s0/n1	
+- server_status	failed	s0/n2	collector_failed
+=== no-result ===
+MongoDB Doctor (repl)
+Findings: none
+Collector Status:
+- replica_status	unauthorized	cluster	unauthorized

@@ -3,6 +3,9 @@ package clioutput
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -55,6 +58,112 @@ func TestPrintCollectionStatsCheckShardModes(t *testing.T) {
 		if !strings.Contains(showAllOutput.String(), namespace) {
 			t.Fatalf("show-all output omitted %s:\n%s", namespace, showAllOutput.String())
 		}
+	}
+}
+
+func TestPrintDiagnosticResultGoldenAndRedactionBoundary(t *testing.T) {
+	// 场景：table 与 JSON 都只渲染 SDK 的脱敏字段，并稳定保留 finding/status。
+	withColorDisabled(t)
+	result := &mot.DoctorResult{
+		ClusterType:       mot.ClusterReplicaSet,
+		Findings:          []mot.DiagnosticFinding{{Code: "replica.primary_missing", Severity: mot.SeverityCritical, Scope: mot.FindingScope{Type: mot.ScopeReplicaSet, ReplicaSet: "rs0"}, Summary: "副本集当前没有 PRIMARY"}},
+		CollectorStatuses: []mot.CollectorStatus{{Name: "replica_status", State: mot.CapabilitySupported, Scope: mot.FindingScope{Type: mot.ScopeReplicaSet, ReplicaSet: "rs0"}}},
+	}
+	var table bytes.Buffer
+	if err := PrintDiagnosticResult(&table, result, FormatTable); err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join("testdata", "diagnostics_doctor.golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if table.String() != string(want) {
+		t.Fatalf("table output mismatch\n--- got ---\n%s\n--- want ---\n%s", table.String(), want)
+	}
+	var jsonOutput bytes.Buffer
+	if err := PrintDiagnosticResult(&jsonOutput, result, FormatJSON); err != nil {
+		t.Fatal(err)
+	}
+	jsonWant, err := os.ReadFile(filepath.Join("testdata", "diagnostics_doctor.json.golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jsonOutput.String() != string(jsonWant) {
+		t.Fatalf("JSON golden mismatch\n--- got ---\n%s\n--- want ---\n%s", jsonOutput.String(), jsonWant)
+	}
+	for _, forbidden := range []string{"mongodb://", "password", "command", "filter", "session"} {
+		if strings.Contains(jsonOutput.String(), forbidden) {
+			t.Fatalf("JSON contains forbidden value %q: %s", forbidden, jsonOutput.String())
+		}
+	}
+}
+
+func TestPrintAllDiagnosticCommandsGolden(t *testing.T) {
+	// 场景：ops、hotspot、index-audit、capacity 与 diff 的 table schema 保持稳定，并保留 collector scope。
+	withColorDisabled(t)
+	count, data, storage, indexSize, delta := int64(2), int64(100), int64(80), int64(20), int64(5)
+	results := []struct {
+		name  string
+		value any
+	}{
+		{"ops", &mot.CurrentOperationsResult{ClusterType: mot.ClusterReplicaSet, Visibility: "all_users", Source: "aggregation", Operations: []mot.CurrentOperation{{Host: "node", Namespace: "db.c", Operation: "query", RunningDuration: 3 * time.Second}}, CollectorStatuses: []mot.CollectorStatus{{Name: "current_operations", State: mot.CapabilitySupported, Scope: mot.FindingScope{Type: mot.ScopeCluster}}}}},
+		{"hotspot", &mot.HotspotResult{ClusterType: mot.ClusterSharded, EffectiveDuration: 2 * time.Second, Namespaces: []mot.NamespaceHotspot{{Shard: "s0", Host: "node", Namespace: "db.c", ReadPerSecond: 1.5, WritePerSecond: 0.5, TotalTimeMicros: 40}}, CollectorStatuses: []mot.CollectorStatus{{Name: "hotspot", State: mot.CapabilitySupported, Scope: mot.FindingScope{Type: mot.ScopeNode, Shard: "s0", Node: "node"}}}}},
+		{"index", &mot.IndexAuditResult{Collections: []mot.CollectionIndexAudit{{Namespace: "db.c", Indexes: []mot.IndexObservation{{Name: "a_1", Shard: "s0", Host: "node", Ops: 0, Since: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), SizeBytes: &indexSize}}}}, CollectorStatuses: []mot.CollectorStatus{{Name: "index_usage", State: mot.CapabilitySupported, Scope: mot.FindingScope{Type: mot.ScopeNamespace, Namespace: "db.c"}}}}},
+		{"capacity", &mot.CapacityResult{SchemaVersion: 1, ClusterIdentity: mot.CapacityIdentity{TopologyType: mot.ClusterReplicaSet, Digest: "digest"}, Databases: []mot.DatabaseCapacity{{Name: "db", Collections: []mot.CollectionCapacity{{Namespace: "db.c", Count: &count, DataSizeBytes: &data, StorageSizeBytes: &storage, IndexSizeBytes: &indexSize}}}}, CollectorStatuses: []mot.CollectorStatus{{Name: "collection_capacity", State: mot.CapabilitySupported, Scope: mot.FindingScope{Type: mot.ScopeNamespace, Namespace: "db.c"}}}}},
+		{"diff", &mot.CapacityDiffResult{Duration: 24 * time.Hour, Collections: []mot.CollectionCapacityDiff{{Namespace: "db.c", State: "existing", Count: mot.CapacityDelta{Delta: &delta}}}}},
+	}
+	var output bytes.Buffer
+	for _, item := range results {
+		fmt.Fprintf(&output, "=== %s ===\n", item.name)
+		if err := PrintDiagnosticResult(&output, item.value, FormatTable); err != nil {
+			t.Fatal(err)
+		}
+		var jsonOutput bytes.Buffer
+		if err := PrintDiagnosticResult(&jsonOutput, item.value, FormatJSON); err != nil {
+			t.Fatal(err)
+		}
+		for _, forbidden := range []string{"mongodb://", "password", "commandDocument", "sessionId"} {
+			if strings.Contains(jsonOutput.String(), forbidden) {
+				t.Fatalf("%s JSON leaked %q", item.name, forbidden)
+			}
+		}
+	}
+	want, err := os.ReadFile(filepath.Join("testdata", "diagnostics_all.golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != string(want) {
+		t.Fatalf("diagnostic golden mismatch\n--- got ---\n%s\n--- want ---\n%s", output.String(), want)
+	}
+}
+
+func TestPrintDiagnosticPartialAndNoResultGolden(t *testing.T) {
+	// 场景：部分覆盖与完全无结果都必须保留 collector status，table 不能误报 healthy。
+	withColorDisabled(t)
+	partial := &mot.DoctorResult{
+		ClusterType: mot.ClusterSharded,
+		Findings:    []mot.DiagnosticFinding{{Code: "operation.queue_sustained", Severity: mot.SeverityWarning, Scope: mot.FindingScope{Type: mot.ScopeNode, Shard: "s0", Node: "n1"}, Summary: "两个快照均观察到操作排队"}},
+		CollectorStatuses: []mot.CollectorStatus{
+			{Name: "server_status", State: mot.CapabilitySupported, Scope: mot.FindingScope{Type: mot.ScopeNode, Shard: "s0", Node: "n1"}},
+			{Name: "server_status", State: mot.CapabilityFailed, Scope: mot.FindingScope{Type: mot.ScopeNode, Shard: "s0", Node: "n2"}, ReasonCode: "collector_failed"},
+		},
+	}
+	noResult := &mot.DoctorResult{ClusterType: mot.ClusterReplicaSet, CollectorStatuses: []mot.CollectorStatus{{Name: "replica_status", State: mot.CapabilityUnauthorized, Scope: mot.FindingScope{Type: mot.ScopeCluster}, ReasonCode: "unauthorized"}}}
+	var output bytes.Buffer
+	fmt.Fprintln(&output, "=== partial ===")
+	if err := PrintDiagnosticResult(&output, partial, FormatTable); err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintln(&output, "=== no-result ===")
+	if err := PrintDiagnosticResult(&output, noResult, FormatTable); err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join("testdata", "diagnostics_states.golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != string(want) {
+		t.Fatalf("state golden mismatch\n--- got ---\n%s\n--- want ---\n%s", output.String(), want)
 	}
 }
 

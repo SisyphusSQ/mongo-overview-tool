@@ -3,6 +3,7 @@ package clioutput
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/fatih/color"
 	"go.mongodb.org/mongo-driver/bson"
@@ -30,6 +31,8 @@ func PrintSlowlogSummary(w io.Writer, result *mot.SlowlogSummaryResult, opts Slo
 			}
 		}
 	}
+	printFindings(w, result.Findings)
+	printStatuses(w, result.CollectorStatuses)
 	return nil
 }
 
@@ -74,12 +77,12 @@ func printSlowlogDatabase(w io.Writer, db mot.DatabaseSlowlogSummary) {
 		color.HiRedString("%d", db.Total),
 		color.GreenString(timeutil.FormatLayoutString(db.FirstTime)),
 		color.GreenString(timeutil.FormatLayoutString(db.LastTime)))
-	fmt.Fprint(w, color.CyanString("%-*s%-*s%-10s%-6s%-10s%-10s%-10s%-22s%-22s\n",
-		width, "ns", hashWidth, "queryHash", "op", "count", "maxMills", "minMills", "maxDocs", "firstTs", "lastTs"))
-	fmt.Fprintf(w, "%-*s%-*s%-10s%-6s%-10s%-10s%-10s%-22s%-22s\n",
-		width, "--", hashWidth, "---------", "--", "-----", "--------", "--------", "-------", "-------", "------")
+	fmt.Fprint(w, color.CyanString("%-*s%-*s%-10s%-6s%-10s%-10s%-10s%-16s%-12s%-12s%-6s%-9s%-18s%-22s%-22s\n",
+		width, "ns", hashWidth, "queryHash", "op", "count", "maxMills", "minMills", "maxDocs", "plan", "docs/ret", "keys/ret", "err", "collscan", "apps", "firstTs", "lastTs"))
+	fmt.Fprintf(w, "%-*s%-*s%-10s%-6s%-10s%-10s%-10s%-16s%-12s%-12s%-6s%-9s%-18s%-22s%-22s\n",
+		width, "--", hashWidth, "---------", "--", "-----", "--------", "--------", "-------", "----", "--------", "--------", "---", "--------", "----", "-------", "------")
 	for _, item := range db.Items {
-		fmt.Fprintf(w, "%-*s%-*s%-10s%-6d%-10d%-10d%-10d%-22s%-22s\n",
+		fmt.Fprintf(w, "%-*s%-*s%-10s%-6d%-10d%-10d%-10d%-16s%-12s%-12s%-6d%-9d%-18s%-22s%-22s\n",
 			width,
 			item.Namespace,
 			hashWidth,
@@ -89,9 +92,22 @@ func printSlowlogDatabase(w io.Writer, db mot.DatabaseSlowlogSummary) {
 			item.MaxMillis,
 			item.MinMillis,
 			item.MaxDocs,
+			item.PlanSummary,
+			optionalRatioText(item.WorstDocsToReturned),
+			optionalRatioText(item.WorstKeysToReturned),
+			item.ErrorCount,
+			item.CollectionScanCount,
+			strings.Join(item.AppNames, ","),
 			timeutil.FormatLayoutString(item.FirstTime),
 			timeutil.FormatLayoutString(item.LastTime),
 		)
 	}
 	fmt.Fprintln(w)
+}
+
+func optionalRatioText(value *float64) string {
+	if value == nil {
+		return "unavailable"
+	}
+	return fmt.Sprintf("%.2f", *value)
 }

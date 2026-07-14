@@ -43,6 +43,41 @@ func (e *PartialError) Is(target error) bool {
 	return target == ErrPartialResult
 }
 
+// DiagnosticPartialError 表示诊断操作已产生安全的结构化部分结果。
+// 它与既有 bulk PartialError 分离，避免破坏外部未命名复合字面量兼容性。
+type DiagnosticPartialError struct {
+	Op     string
+	Result any
+	Err    error
+}
+
+func (e *DiagnosticPartialError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%s partial result", e.Op)
+}
+
+func (e *DiagnosticPartialError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func (e *DiagnosticPartialError) Is(target error) bool { return target == ErrPartialResult }
+
+func (e *DiagnosticPartialError) DiagnosticResult() any {
+	if e == nil {
+		return nil
+	}
+	return e.Result
+}
+
+func newDiagnosticPartialError(op string, result any, err error) *DiagnosticPartialError {
+	return &DiagnosticPartialError{Op: op, Result: result, Err: err}
+}
+
 func invalidOptions(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalidOptions, fmt.Sprintf(format, args...))
 }

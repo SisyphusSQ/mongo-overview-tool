@@ -97,6 +97,8 @@ type CollectorStatus struct {
 - context cancel / deadline：映射为现有取消语义，保留已完成结果。
 - unauthorized：单 collector status；只有命令的所有必需数据都不可见时才返回整体 error。
 
+`index-audit consistency` 的 CLI 将索引差异和 collection 级 incomplete visibility 视为审计结果：只要范围发现成功且存在可渲染 result，CLI 输出 result 后返回 0；SDK 仍可返回 result + `*PartialError`。参数非法、基础连接失败、非 `mongos`、范围发现失败、collection gate 超限、context 取消或 formatter 失败仍返回非零。该命令不提供 `--fail-on`。
+
 ## 离线测试矩阵
 
 ### Result 与规则单测
@@ -113,11 +115,14 @@ type CollectorStatus struct {
 
 | 版本族 | 重点 |
 | --- | --- |
-| MongoDB 3.4 | 无 queryHash、旧 currentOp / serverStatus 字段、字段缺失 |
-| MongoDB 4.4 | 常见自建副本集基线 |
-| MongoDB 6.x | 新 profiler / connection 字段、currentOp command 弃用边界 |
-| MongoDB 7.x | metadata consistency、targetAllNodes 等能力门控 |
-| MongoDB 8.x | 新 queue / working time 字段和未知字段向前兼容 |
+| MongoDB 3.4 | 无 queryHash、旧 currentOp / serverStatus 字段、索引一致性 direct collector |
+| MongoDB 4.2.3 | `$indexStats` 尚无稳定 shard/spec/building，使用 direct collector |
+| MongoDB 4.2.4 | `$indexStats` shard/spec/building 版本断点 |
+| MongoDB 4.4 | 常见自建副本集基线、hidden index 属性 |
+| MongoDB 5.x | `$indexStats` 完整 spec 与字段缺失 fallback |
+| MongoDB 6.x | 新 profiler / connection 字段、currentOp command 弃用边界、索引一致性 legacy 主路径 |
+| MongoDB 7.x | metadata consistency cursor、索引 finding 归一化与 fallback |
+| MongoDB 8.x | 仅用于其它诊断字段的未知字段向前兼容；不属于 Goal 08 支持范围 |
 
 fixture 必须脱敏，不提交真实 host、用户名、URI 或业务查询。
 
@@ -135,6 +140,7 @@ fixture 必须脱敏，不提交真实 host、用户名、URI 或业务查询。
 
 - 副本集：doctor、ops、hotspot、index-audit、capacity、slowlog insight。
 - 分片集群：逐 shard 派生连接、namespace 聚合和部分节点失败。
+- 索引一致性：MongoDB 3.4 与 7.x 分片集群为 required 只读 live gate；中间版本使用离线 fixture。
 - 权限：`clusterMonitor` 正常覆盖；受限用户返回 unauthorized / incomplete visibility。
 - 不在 live E2E 执行任何写操作或配置变更。
 
@@ -168,6 +174,9 @@ MOT_TEST_MONGO_URI='<redacted-uri>' \
 3. table 已脱敏但 JSON / logger 仍泄漏 raw BSON。
 4. 分片结果是否丢失 shard / host 来源，或重复汇总。
 5. counter reset、节点重启和不同采集时间是否产生错误 rate。
+6. 索引一致性的 expected shards 是否独立于 observation，整个 shard 缺失时是否仍可能误报健康。
+7. 7.x 官方 cursor 是否完整消费，fallback 是否保留原始失败与最终 coverage。
+8. 构建中索引或并发 DDL 是否产生未经二次确认的 legacy warning。
 
 ## Done Gate
 
@@ -179,8 +188,11 @@ MOT_TEST_MONGO_URI='<redacted-uri>' \
 - 权限降级、版本 fixture、partial result 和脱敏通过 review。
 - 高级分片功能没有被顺手纳入一期实现。
 
+Goal 08 使用独立 execution issue 和验收出口，只依赖 `TOO-230` 的公共 capability/finding/status 与 `index-audit` 骨架，不要求等待其它 Top 5 全部完成；也不得借此实现完整 `metadata-check`。
+
 ## 参考资料
 
 - [SDK 化详细设计](../../sdkization/README.md)
 - [测试基线目标](../../sdkization/goals/07-default-test-baseline.md)
 - [CLI 兼容目标](../../sdkization/goals/02-cli-compatibility.md)
+- [分片集群全库索引一致性审计](08-sharded-index-consistency-audit.md)

@@ -1,0 +1,30 @@
+{
+  "clusterType": "repl",
+  "collectedAt": "0001-01-01T00:00:00Z",
+  "findings": [
+    {
+      "code": "replica.primary_missing",
+      "severity": "critical",
+      "scope": {
+        "type": "replica_set",
+        "replicaSet": "rs0"
+      },
+      "summary": "副本集当前没有 PRIMARY"
+    }
+  ],
+  "collectorStatuses": [
+    {
+      "name": "replica_status",
+      "state": "supported",
+      "scope": {
+        "type": "replica_set",
+        "replicaSet": "rs0"
+      }
+    }
+  ],
+  "summary": {
+    "info": 0,
+    "warning": 0,
+    "critical": 0
+  }
+}

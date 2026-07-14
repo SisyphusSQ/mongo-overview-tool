@@ -1,0 +1,5 @@
+MongoDB Doctor (repl)
+Findings:
+- CRITICAL	replica.primary_missing	rs0	副本集当前没有 PRIMARY
+Collector Status:
+- replica_status	supported	rs0	

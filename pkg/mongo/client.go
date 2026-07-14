@@ -151,6 +151,21 @@ func (c *Conn) DBStatus(ctx context.Context, db string) (result DBStats, err err
 }
 
 func (c *Conn) GetSlowLogView(ctx context.Context, db, sort string) (result []*SlowlogView, err error) {
+	errorCondition := bson.D{{Key: "$or", Value: bson.A{
+		bson.D{{Key: "$ne", Value: bson.A{"$errCode", nil}}},
+		bson.D{{Key: "$ne", Value: bson.A{"$errName", nil}}},
+	}}}
+	errorCountExpression := bson.D{
+		{Key: "$sum", Value: bson.D{
+			{Key: "$cond", Value: bson.A{errorCondition, int64(1), int64(0)}},
+		}},
+	}
+	collectionScanCondition := bson.D{{Key: "$eq", Value: bson.A{"$planSummary", "COLLSCAN"}}}
+	collectionScanExpression := bson.D{
+		{Key: "$sum", Value: bson.D{
+			{Key: "$cond", Value: bson.A{collectionScanCondition, int64(1), int64(0)}},
+		}},
+	}
 	agg := bson.A{
 		bson.D{
 			{Key: "$group",
@@ -167,11 +182,18 @@ func (c *Conn) GetSlowLogView(ctx context.Context, db, sort string) (result []*S
 					{Key: "op", Value: bson.D{{Key: "$first", Value: "$op"}}},
 					{Key: "queryHash", Value: bson.D{{Key: "$first", Value: "$queryHash"}}},
 					{Key: "planSummary", Value: bson.D{{Key: "$first", Value: "$planSummary"}}},
-					{Key: "cmd", Value: bson.D{{Key: "$first", Value: "$command"}}},
 					{Key: "cnt", Value: bson.D{{Key: "$sum", Value: 1}}},
 					{Key: "maxMills", Value: bson.D{{Key: "$max", Value: "$millis"}}},
 					{Key: "minMills", Value: bson.D{{Key: "$min", Value: "$millis"}}},
 					{Key: "maxDocs", Value: bson.D{{Key: "$max", Value: "$docsExamined"}}},
+					{Key: "maxKeysExamined", Value: bson.D{{Key: "$max", Value: "$keysExamined"}}},
+					{Key: "maxDocsExamined", Value: bson.D{{Key: "$max", Value: "$docsExamined"}}},
+					{Key: "maxDocsReturned", Value: bson.D{{Key: "$max", Value: "$nreturned"}}},
+					{Key: "maxPlanningMicros", Value: bson.D{{Key: "$max", Value: "$planningTimeMicros"}}},
+					{Key: "maxCpuNanos", Value: bson.D{{Key: "$max", Value: "$cpuNanos"}}},
+					{Key: "appNames", Value: bson.D{{Key: "$addToSet", Value: "$appName"}}},
+					{Key: "errorCount", Value: errorCountExpression},
+					{Key: "collectionScanCount", Value: collectionScanExpression},
 					{Key: "maxTs", Value: bson.D{{Key: "$max", Value: "$ts"}}},
 					{Key: "minTs", Value: bson.D{{Key: "$min", Value: "$ts"}}},
 				},
@@ -190,6 +212,14 @@ func (c *Conn) GetSlowLogView(ctx context.Context, db, sort string) (result []*S
 					{Key: "maxMills", Value: 1},
 					{Key: "minMills", Value: 1},
 					{Key: "maxDocs", Value: 1},
+					{Key: "maxKeysExamined", Value: 1},
+					{Key: "maxDocsExamined", Value: 1},
+					{Key: "maxDocsReturned", Value: 1},
+					{Key: "maxPlanningMicros", Value: 1},
+					{Key: "maxCpuNanos", Value: 1},
+					{Key: "appNames", Value: 1},
+					{Key: "errorCount", Value: 1},
+					{Key: "collectionScanCount", Value: 1},
 					{Key: "maxTs", Value: 1},
 					{Key: "minTs", Value: 1},
 				},
