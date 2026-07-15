@@ -105,7 +105,7 @@
 | `doctor` | `replSetGetStatus`、`serverStatus`、`dbStats` | low / bounded | 是 | 执行确定性健康检查和保守阈值检查 |
 | `ops` | `$currentOp`，旧版本受控 fallback | low | 是 | 只展示长操作、等待、长事务和维护进度 |
 | `hotspot` | 两次 `serverStatus` + `top` | bounded | 是 | 默认采样 10 秒，返回速率和 Top N |
-| `index-audit` | `listIndexes`、`$indexStats`、集合统计 | bounded | 是 | 只给人工复核候选，不建议自动删除 |
+| `index-audit` | `listIndexes`、`$indexStats`、7.x `checkMetadataConsistency`、集合统计 | bounded | 是 | 默认包含 3.4–7.x 跨 shard 一致性检查，只给人工复核候选 |
 | `capacity` | `dbStats`、`collStats` / `$collStats` | bounded | 是 | free storage 仅显式启用，支持快照差异 |
 | `slowlog-insight` | `system.profile` | bounded | 是 | 追加诊断字段，不自动开启 Profiler |
 | `shard-health` | `balancerCollectionStatus`、分片统计 | 高权限 | 后续 | 显式命令，不进入默认 `doctor` |
@@ -244,7 +244,7 @@ type CollectorStatus struct {
 2. `doctor`：优先复用现有 overview 数据，再增加确定性检查。
 3. `ops` 和 `slowlog-insight`：补齐当前事故定位链路。
 4. `hotspot`：建立通用双快照和 counter delta 组件。
-5. `index-audit` 与 `capacity`：复用遍历、过滤、并发和快照能力。
+5. `index-audit` 与 `capacity`：复用遍历、过滤、并发和快照能力；跨 shard 索引一致性按 Goal 08 的版本策略实现。
 6. 完成 CLI table/JSON、fixture、golden 和 live E2E。
 7. 一期结束后再评估高级分片命令和 diagnostic bundle。
 
@@ -271,6 +271,7 @@ type CollectorStatus struct {
 | 慢日志洞察 | [05-slowlog-insights.md](goals/05-slowlog-insights.md) |
 | 分片与元数据诊断 | [06-sharding-and-metadata-diagnostics.md](goals/06-sharding-and-metadata-diagnostics.md) |
 | 结果、CLI 与测试 contract | [07-result-contracts-cli-and-testing.md](goals/07-result-contracts-cli-and-testing.md) |
+| 分片集群全库索引一致性审计 | [08-sharded-index-consistency-audit.md](goals/08-sharded-index-consistency-audit.md) |
 
 ## 参考资料
 

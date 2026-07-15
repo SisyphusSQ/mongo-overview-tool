@@ -191,6 +191,7 @@ type RsMember struct {
 	InfoMessage          string              `json:"infoMessage" bson:"infoMessage"`
 	LastAppliedWallTime  time.Time           `json:"lastAppliedWallTime" bson:"lastAppliedWallTime"`
 	LastDurableWallTime  time.Time           `json:"lastDurableWallTime" bson:"lastDurableWallTime"`
+	LastHeartbeat        time.Time           `json:"lastHeartbeat" bson:"lastHeartbeat"`
 	LastHeartbeatMessage string              `json:"lastHeartbeatMessage" bson:"lastHeartbeatMessage"`
 	Name                 string              `json:"name" bson:"name"`
 	Optime               Optime              `json:"optime" bson:"optime"`
@@ -233,16 +234,24 @@ type Optime struct {
 }
 
 type SlowlogView struct {
-	Ns          string    `json:"ns" bson:"ns"`
-	Op          string    `json:"op" bson:"op"`
-	QueryHash   string    `json:"queryHash" bson:"queryHash"`
-	PlanSummary string    `json:"planSummary" bson:"planSummary"`
-	Cnt         int64     `json:"cnt" bson:"cnt"`
-	MaxMills    int64     `json:"maxMills" bson:"maxMills"`
-	MinMills    int64     `json:"minMills" bson:"minMills"`
-	MaxDocs     int64     `json:"maxDocs" bson:"maxDocs"`
-	MaxTs       time.Time `json:"maxTs" bson:"maxTs"`
-	MinTs       time.Time `json:"minTs" bson:"minTs"`
+	Ns                  string    `json:"ns" bson:"ns"`
+	Op                  string    `json:"op" bson:"op"`
+	QueryHash           string    `json:"queryHash" bson:"queryHash"`
+	PlanSummary         string    `json:"planSummary" bson:"planSummary"`
+	Cnt                 int64     `json:"cnt" bson:"cnt"`
+	MaxMills            int64     `json:"maxMills" bson:"maxMills"`
+	MinMills            int64     `json:"minMills" bson:"minMills"`
+	MaxDocs             int64     `json:"maxDocs" bson:"maxDocs"`
+	MaxKeysExamined     *int64    `json:"maxKeysExamined,omitempty" bson:"maxKeysExamined"`
+	MaxDocsExamined     *int64    `json:"maxDocsExamined,omitempty" bson:"maxDocsExamined"`
+	MaxDocsReturned     *int64    `json:"maxDocsReturned,omitempty" bson:"maxDocsReturned"`
+	MaxPlanningMicros   *int64    `json:"maxPlanningMicros,omitempty" bson:"maxPlanningMicros"`
+	MaxCPUNanos         *int64    `json:"maxCpuNanos,omitempty" bson:"maxCpuNanos"`
+	AppNames            []string  `json:"appNames,omitempty" bson:"appNames"`
+	ErrorCount          int64     `json:"errorCount" bson:"errorCount"`
+	CollectionScanCount int64     `json:"collectionScanCount" bson:"collectionScanCount"`
+	MaxTs               time.Time `json:"maxTs" bson:"maxTs"`
+	MinTs               time.Time `json:"minTs" bson:"minTs"`
 
 	DB string `json:"-" bson:"-"`
 }

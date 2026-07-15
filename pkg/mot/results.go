@@ -93,8 +93,10 @@ type SlowlogOptions struct {
 }
 
 type SlowlogSummaryResult struct {
-	ClusterType ClusterType                `json:"clusterType"`
-	ReplicaSets []ReplicaSetSlowlogSummary `json:"replicaSets"`
+	ClusterType       ClusterType                `json:"clusterType"`
+	ReplicaSets       []ReplicaSetSlowlogSummary `json:"replicaSets"`
+	Findings          []DiagnosticFinding        `json:"findings,omitempty"`
+	CollectorStatuses []CollectorStatus          `json:"collectorStatuses,omitempty"`
 }
 
 type ReplicaSetSlowlogSummary struct {
@@ -114,6 +116,7 @@ type DatabaseSlowlogSummary struct {
 	FirstTime time.Time            `json:"firstTime"`
 	LastTime  time.Time            `json:"lastTime"`
 	Items     []SlowlogSummaryItem `json:"items"`
+	Findings  []DiagnosticFinding  `json:"findings,omitempty"`
 }
 
 type SlowlogSummaryItem struct {
@@ -126,6 +129,18 @@ type SlowlogSummaryItem struct {
 	MaxDocs   int64     `json:"maxDocs"`
 	FirstTime time.Time `json:"firstTime"`
 	LastTime  time.Time `json:"lastTime"`
+
+	PlanSummary         string   `json:"planSummary,omitempty"`
+	MaxKeysExamined     *int64   `json:"maxKeysExamined,omitempty"`
+	MaxDocsExamined     *int64   `json:"maxDocsExamined,omitempty"`
+	MaxDocsReturned     *int64   `json:"maxDocsReturned,omitempty"`
+	WorstDocsToReturned *float64 `json:"worstDocsToReturned,omitempty"`
+	WorstKeysToReturned *float64 `json:"worstKeysToReturned,omitempty"`
+	MaxPlanningMicros   *int64   `json:"maxPlanningMicros,omitempty"`
+	MaxCPUNanos         *int64   `json:"maxCpuNanos,omitempty"`
+	AppNames            []string `json:"appNames,omitempty"`
+	ErrorCount          int64    `json:"errorCount,omitempty"`
+	CollectionScanCount int64    `json:"collectionScanCount,omitempty"`
 }
 
 type SlowlogDetailResult struct {

@@ -158,7 +158,7 @@ func (c *Client) closeDerivedConnection(ctx context.Context, conn *pkgmongo.Conn
 	closeCtx, cancel := cleanupContext(ctx)
 	defer cancel()
 	if err := conn.CloseWithContext(closeCtx); err != nil {
-		c.logger.Warnf("failed to close derived MongoDB connection: %v", err)
+		c.logger.Warnf("failed to close derived MongoDB connection; detail suppressed")
 	}
 }
 

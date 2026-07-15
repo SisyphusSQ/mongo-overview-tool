@@ -94,12 +94,17 @@ type Capability struct {
 | `serverStatus` | `mongod`，部分字段可来自 `mongos` | 字段按 presence 解码，不假定所有版本都有同一结构 |
 | `$currentOp` | admin aggregate；分片可从 `mongos` fan-out | 支持时优先；旧版本才使用受控 fallback |
 | `top` | 仅 `mongod` | 对分片和副本集逐数据节点执行 |
-| `$indexStats` | collection aggregate | 结果按 node/shard 保留，不错误合并统计起点 |
+| `$indexStats` 基础统计 | collection aggregate | 3.2+；结果按 node/shard 保留，不错误合并统计起点 |
+| 索引一致性 direct collector | 分片集群且入口为 `mongos` | MongoDB 3.4–4.2.3 通过派生 shard 连接执行 `listIndexes` |
+| 索引一致性 `$indexStats` collector | 分片集群且入口为 `mongos` | MongoDB 4.2.4–6.x 优先使用 `shard`、`spec`、`building`，字段或覆盖不完整时 direct fallback |
+| 索引一致性官方 collector | MongoDB 7.x 且仅 `mongos` | `index-audit consistency` 优先执行 `checkMetadataConsistency(checkIndexes=true)`，失败时按 coverage 规则 fallback |
 | free storage | `dbStats` / collection stats | 字段不存在则标记 unsupported，不伪造零值 |
-| `checkMetadataConsistency` | MongoDB 7+ 且仅 `mongos` | 高级显式命令 |
+| 通用 `checkMetadataConsistency` | MongoDB 7+ 且仅 `mongos` | 索引域由 `index-audit consistency` 复用；完整元数据检查仍是后续显式命令 |
 | `analyzeShardKey` | 版本、拓扑、索引和权限均有限制 | `expensive-opt-in`，一期不实现 |
 
 MongoDB 3.4 等旧版本继续允许基础 `doctor`、慢日志兼容标识和现有集合统计工作；新字段缺失不得引发 decode failure。
+
+`index-audit consistency` 的支持范围明确冻结为 MongoDB 3.4–7.x。expected shards 必须独立于索引 observation 获取；版本无法可靠识别、低于 3.4 或高于 7.x 时使用 `unsupported_server_version`，不能猜测执行策略。详细策略见 [08 分片集群全库索引一致性审计](08-sharded-index-consistency-audit.md)。
 
 ## 脱敏规则
 

@@ -133,13 +133,14 @@ mot shard-key analyze
 ## 与一期功能的关系
 
 - `doctor` 只报告当前 shard replica set 健康，不调用高权限 balancer 命令。
-- `index-audit` 可以做低权限 spec 对比，但不替代 `metadata-check(checkIndexes=true)`。
+- `index-audit consistency` 覆盖 MongoDB 3.4–7.x 的跨 shard 索引一致性；7.x 优先复用 `checkMetadataConsistency(checkIndexes=true)`，但只归一化索引域结果。
+- 完整 `metadata-check` 仍负责路由表、UUID、zone、collection options 等通用元数据问题，不被 `index-audit` 替代。
 - `capacity` 保留 per-shard storage stats，为未来 distribution skew 提供结构化基础。
 - `ops` 可以展示正在进行的 migration / resharding，但不控制它们。
 
 ## 后续验收要求
 
-进入实现前必须单独建立 execution issue，并至少验证：
+完整 `metadata-check` 进入实现前仍必须单独建立 execution issue，并至少验证：
 
 - MongoDB 7+ 分片集群的 metadata inconsistency fixture 与 live E2E。
 - `clusterMonitor` 和 `clusterManager` 两种权限行为。
@@ -148,9 +149,12 @@ mot shard-key analyze
 - unknown inconsistency type 向前兼容。
 - 所有输出经过 shard key value、host 和 namespace 脱敏策略评审。
 
+`index-audit consistency` 使用独立设计和 execution issue，验收边界见 [08 分片集群全库索引一致性审计](08-sharded-index-consistency-audit.md)，不以该卡已存在为由顺手实现完整 `metadata-check`。
+
 ## 参考资料
 
 - [MongoDB `balancerCollectionStatus`](https://www.mongodb.com/docs/manual/reference/command/balancercollectionstatus/)
 - [MongoDB `checkMetadataConsistency`](https://www.mongodb.com/docs/manual/reference/command/checkmetadataconsistency/)
 - [MongoDB Inconsistency Types](https://www.mongodb.com/docs/manual/reference/inconsistency-type/)
 - [MongoDB `analyzeShardKey`](https://www.mongodb.com/docs/manual/reference/command/analyzeshardkey/)
+- [分片集群全库索引一致性审计](08-sharded-index-consistency-audit.md)

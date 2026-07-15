@@ -94,6 +94,46 @@ func TestLiveSDKReadOnlyE2E(t *testing.T) {
 		t.Fatalf("CollectionStats returned no collection")
 	}
 
+	doctor, doctorErr := client.Doctor(ctx, DoctorOptions{NodeConcurrency: 2})
+	if doctorErr != nil && !errors.Is(doctorErr, ErrPartialResult) {
+		t.Fatalf("Doctor failed: %v", doctorErr)
+	}
+	if doctor == nil || len(doctor.CollectorStatuses) == 0 {
+		t.Fatalf("Doctor returned no collector status")
+	}
+
+	operations, operationsErr := client.CurrentOperations(ctx, CurrentOperationsOptions{AllUsers: true, Limit: 20, MaxTime: 5 * time.Second})
+	if operationsErr != nil && !errors.Is(operationsErr, ErrPartialResult) {
+		t.Fatalf("CurrentOperations failed: %v", operationsErr)
+	}
+	if operations == nil || len(operations.CollectorStatuses) == 0 {
+		t.Fatalf("CurrentOperations returned no collector status")
+	}
+
+	hotspot, hotspotErr := client.Hotspot(ctx, HotspotOptions{Duration: 100 * time.Millisecond, TopN: 5, NodeConcurrency: 2, Databases: []string{database}})
+	if hotspotErr != nil && !errors.Is(hotspotErr, ErrPartialResult) {
+		t.Fatalf("Hotspot failed: %v", hotspotErr)
+	}
+	if hotspot == nil || hotspot.EffectiveDuration <= 0 {
+		t.Fatalf("Hotspot returned no comparable sampling window")
+	}
+
+	indexAudit, indexAuditErr := client.IndexAudit(ctx, IndexAuditOptions{Databases: []string{database}, Collections: []string{collection}, Checks: []IndexAuditCheck{IndexCheckUnused, IndexCheckRedundant, IndexCheckSpace, IndexCheckBuilding}, MinObservation: time.Hour, MaxCollections: 1, Concurrency: 1})
+	if indexAuditErr != nil && !errors.Is(indexAuditErr, ErrPartialResult) {
+		t.Fatalf("IndexAudit failed: %v", indexAuditErr)
+	}
+	if indexAudit == nil || len(indexAudit.Collections) != 1 {
+		t.Fatalf("IndexAudit returned no selected collection")
+	}
+
+	capacity, capacityErr := client.Capacity(ctx, CapacityOptions{Databases: []string{database}, Collections: []string{collection}, MaxCollections: 1, Concurrency: 1})
+	if capacityErr != nil && !errors.Is(capacityErr, ErrPartialResult) {
+		t.Fatalf("Capacity failed: %v", capacityErr)
+	}
+	if capacity == nil || len(capacity.Databases) != 1 {
+		t.Fatalf("Capacity returned no selected database")
+	}
+
 	if expectedCluster == ClusterReplicaSet {
 		_, err := client.CollectionStats(ctx, CollectionStatsOptions{
 			Databases:             []string{database},
@@ -137,11 +177,16 @@ func TestLiveSDKReadOnlyE2E(t *testing.T) {
 	}
 
 	t.Logf(
-		"live read-only E2E passed: clusterType=%s replicaSets=%d nodes=%d collections=%d slowlogReplicaSets=%d slowlogItems=%d detailIndexes=%d",
+		"live read-only E2E passed: clusterType=%s replicaSets=%d nodes=%d collections=%d doctorStatuses=%d ops=%d hotspotNamespaces=%d indexCollections=%d capacityDatabases=%d slowlogReplicaSets=%d slowlogItems=%d detailIndexes=%d",
 		overview.ClusterType,
 		len(overview.ReplicaSets),
 		liveNodeCount(overview),
 		liveCollectionCount(stats),
+		len(doctor.CollectorStatuses),
+		len(operations.Operations),
+		len(hotspot.Namespaces),
+		len(indexAudit.Collections),
+		len(capacity.Databases),
 		len(slowlog.ReplicaSets),
 		liveSlowlogItemCount(slowlog),
 		len(detail.Indexes),

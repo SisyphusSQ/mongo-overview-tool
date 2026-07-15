@@ -18,8 +18,9 @@ const (
 )
 
 type ClusterInfo struct {
-	Type ClusterType
-	Repl map[string]string // replName -> replUri
+	Type           ClusterType
+	Repl           map[string]string // replName -> replUri
+	MaxWireVersion int
 }
 
 func DetectCluster(ctx context.Context, conn *Conn) (*ClusterInfo, error) {
@@ -27,12 +28,13 @@ func DetectCluster(ctx context.Context, conn *Conn) (*ClusterInfo, error) {
 		Repl: make(map[string]string),
 	}
 
-	isSharding, err := conn.IsSharding(ctx)
+	master, err := conn.IsMaster(ctx)
 	if err != nil {
 		return nil, err
 	}
+	info.MaxWireVersion = master.MaxWireVersion
 
-	if isSharding {
+	if master.Msg == "isdbgrid" {
 		info.Type = ClusterShard
 		shStatus, err := conn.ListShards(ctx)
 		if err != nil {
@@ -48,11 +50,6 @@ func DetectCluster(ctx context.Context, conn *Conn) (*ClusterInfo, error) {
 		}
 	} else {
 		info.Type = ClusterRepl
-		master, err := conn.IsMaster(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("get replica set primary: %w", err)
-		}
-
 		info.Repl[master.SetName] = master.Me
 	}
 
