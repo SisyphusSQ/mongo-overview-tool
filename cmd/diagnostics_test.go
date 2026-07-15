@@ -1,18 +1,23 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
 	"github.com/SisyphusSQ/mongo-overview-tool/internal/config"
 	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
 )
+
+var initializeCommandsForTest sync.Once
 
 func TestParseIndexChecksRejectsUnknownBeforeConnection(t *testing.T) {
 	// 场景：未知 check 必须在建立 MongoDB 连接前失败。
@@ -70,8 +75,9 @@ func TestDiagnosticCLIErrorDoesNotExposeServerDetail(t *testing.T) {
 }
 
 func TestDiagnosticCommandFlagDefaultsAndIndexMutualExclusion(t *testing.T) {
-	// 场景：五个命令的关键成本/数量/格式默认值稳定，index database 选择严格互斥。
-	initDiagnostics()
+	// 场景：五个命令的关键默认值保持稳定，index database 选择严格互斥，且完整命令树的 help 只使用英文。
+	initializeCommandsForTest.Do(initAll)
+	assertCommandTreeHelpUsesEnglish(t, rootCmd)
 	tests := []struct {
 		command *cobra.Command
 		flags   map[string]string
@@ -109,6 +115,26 @@ func TestDiagnosticCommandFlagDefaultsAndIndexMutualExclusion(t *testing.T) {
 	}
 	if got := []string{doctorCmd.Name(), opsCmd.Name(), hotspotCmd.Name(), indexAuditCmd.Name(), capacityCmd.Name()}; !reflect.DeepEqual(got, []string{"doctor", "ops", "hotspot", "index-audit", "capacity"}) {
 		t.Fatalf("commands = %v", got)
+	}
+}
+
+func assertCommandTreeHelpUsesEnglish(t *testing.T, command *cobra.Command) {
+	t.Helper()
+	assertCommandHelpUsesEnglish(t, command)
+	for _, child := range command.Commands() {
+		assertCommandTreeHelpUsesEnglish(t, child)
+	}
+}
+
+func assertCommandHelpUsesEnglish(t *testing.T, command *cobra.Command) {
+	t.Helper()
+	var output bytes.Buffer
+	command.SetOut(&output)
+	if err := command.Help(); err != nil {
+		t.Fatalf("%s help: %v", command.CommandPath(), err)
+	}
+	if strings.IndexFunc(output.String(), func(r rune) bool { return unicode.Is(unicode.Han, r) }) >= 0 {
+		t.Fatalf("%s help contains Chinese text:\n%s", command.CommandPath(), output.String())
 	}
 }
 

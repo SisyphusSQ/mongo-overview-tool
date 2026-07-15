@@ -80,7 +80,7 @@ var capacityConfig struct {
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "执行只读 MongoDB 健康巡检",
+	Short: "Run a read-only MongoDB health check",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		severity := mot.Severity(doctorConfig.MinimumSeverity)
 		if err := validateDoctorCLI(doctorConfig.diagnosticBaseConfig, severity, doctorConfig.Concurrency); err != nil {
@@ -100,7 +100,7 @@ var doctorCmd = &cobra.Command{
 
 var opsCmd = &cobra.Command{
 	Use:   "ops",
-	Short: "查看经过服务端过滤和脱敏的活跃操作",
+	Short: "View active operations with server-side filtering and redaction",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if err := validateDiagnosticBase(opsConfig.diagnosticBaseConfig); err != nil {
 			return err
@@ -125,7 +125,7 @@ var opsCmd = &cobra.Command{
 
 var hotspotCmd = &cobra.Command{
 	Use:   "hotspot",
-	Short: "通过双快照识别节点和 namespace 热点",
+	Short: "Identify node and namespace hotspots using two snapshots",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if err := validateDiagnosticBase(hotspotConfig.diagnosticBaseConfig); err != nil {
 			return err
@@ -150,7 +150,7 @@ var hotspotCmd = &cobra.Command{
 
 var indexAuditCmd = &cobra.Command{
 	Use:   "index-audit",
-	Short: "审计索引使用、定义和空间候选",
+	Short: "Audit index usage, definitions, and storage candidates",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if err := validateDiagnosticBase(indexAuditConfig.diagnosticBaseConfig); err != nil {
 			return err
@@ -182,7 +182,7 @@ var indexAuditCmd = &cobra.Command{
 
 var capacityCmd = &cobra.Command{
 	Use:   "capacity",
-	Short: "采集稳定、脱敏的 MongoDB 容量快照",
+	Short: "Collect a stable, redacted MongoDB capacity snapshot",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if err := validateDiagnosticBase(capacityConfig.diagnosticBaseConfig); err != nil {
 			return err
@@ -212,7 +212,7 @@ var capacityCmd = &cobra.Command{
 
 var capacityDiffCmd = &cobra.Command{
 	Use:   "diff <before.json> <after.json>",
-	Short: "纯离线比较两份容量快照",
+	Short: "Compare two capacity snapshots offline",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		format, _ := cmd.Flags().GetString("format")
@@ -237,54 +237,54 @@ var capacityDiffCmd = &cobra.Command{
 
 func initDiagnostics() {
 	registerDiagnosticFlags(doctorCmd, &doctorConfig.diagnosticBaseConfig)
-	doctorCmd.Flags().StringVar(&doctorConfig.MinimumSeverity, "minimum-severity", "info", "最小 finding severity: info|warning|critical")
-	doctorCmd.Flags().IntVar(&doctorConfig.Concurrency, "concurrency", 10, "节点采集并发上限")
-	doctorCmd.Flags().BoolVar(&doctorConfig.IncludeSystemDB, "include-system-db", false, "包含系统数据库")
-	doctorCmd.Flags().BoolVar(&doctorConfig.OplogWindow, "oplog-window", false, "采集可选 oplog window")
+	doctorCmd.Flags().StringVar(&doctorConfig.MinimumSeverity, "minimum-severity", "info", "Minimum finding severity: info|warning|critical")
+	doctorCmd.Flags().IntVar(&doctorConfig.Concurrency, "concurrency", 10, "Maximum number of concurrent node collectors")
+	doctorCmd.Flags().BoolVar(&doctorConfig.IncludeSystemDB, "include-system-db", false, "Include system databases")
+	doctorCmd.Flags().BoolVar(&doctorConfig.OplogWindow, "oplog-window", false, "Collect optional oplog window metrics")
 
 	registerDiagnosticFlags(opsCmd, &opsConfig.diagnosticBaseConfig)
-	opsCmd.Flags().DurationVar(&opsConfig.MinDuration, "min-duration", 2*time.Second, "最小运行时间")
-	opsCmd.Flags().BoolVar(&opsConfig.AllUsers, "all-users", true, "请求查看所有用户操作，权限不足时降级；设为 false 时仅当前用户")
-	opsCmd.Flags().BoolVar(&opsConfig.IncludeIdleTransactions, "include-idle-transactions", false, "包含 idle transaction")
-	opsCmd.Flags().BoolVar(&opsConfig.IncludeIdleCursors, "include-idle-cursors", false, "包含 idle cursor")
-	opsCmd.Flags().StringVar(&opsConfig.Databases, "database", "", "数据库 CSV 过滤")
-	opsCmd.Flags().StringVar(&opsConfig.Namespaces, "namespace", "", "namespace CSV 过滤")
-	opsCmd.Flags().IntVar(&opsConfig.Limit, "limit", 100, "最大返回条数")
+	opsCmd.Flags().DurationVar(&opsConfig.MinDuration, "min-duration", 2*time.Second, "Minimum operation duration")
+	opsCmd.Flags().BoolVar(&opsConfig.AllUsers, "all-users", true, "Request operations for all users; fall back to the current user if unauthorized")
+	opsCmd.Flags().BoolVar(&opsConfig.IncludeIdleTransactions, "include-idle-transactions", false, "Include idle transactions")
+	opsCmd.Flags().BoolVar(&opsConfig.IncludeIdleCursors, "include-idle-cursors", false, "Include idle cursors")
+	opsCmd.Flags().StringVar(&opsConfig.Databases, "database", "", "Filter by database names (CSV)")
+	opsCmd.Flags().StringVar(&opsConfig.Namespaces, "namespace", "", "Filter by namespaces (CSV)")
+	opsCmd.Flags().IntVar(&opsConfig.Limit, "limit", 100, "Maximum number of results")
 
 	registerDiagnosticFlags(hotspotCmd, &hotspotConfig.diagnosticBaseConfig)
-	hotspotCmd.Flags().DurationVar(&hotspotConfig.Duration, "duration", 10*time.Second, "双快照采样间隔")
-	hotspotCmd.Flags().IntVar(&hotspotConfig.TopN, "top", 10, "namespace 热点返回上限")
-	hotspotCmd.Flags().IntVar(&hotspotConfig.Concurrency, "concurrency", 10, "节点采集并发上限")
-	hotspotCmd.Flags().StringVar(&hotspotConfig.Databases, "database", "", "数据库 CSV 过滤")
-	hotspotCmd.Flags().BoolVar(&hotspotConfig.IncludeSystemDB, "include-system-db", false, "包含系统数据库")
+	hotspotCmd.Flags().DurationVar(&hotspotConfig.Duration, "duration", 10*time.Second, "Interval between the two snapshots")
+	hotspotCmd.Flags().IntVar(&hotspotConfig.TopN, "top", 10, "Maximum number of namespace hotspots")
+	hotspotCmd.Flags().IntVar(&hotspotConfig.Concurrency, "concurrency", 10, "Maximum number of concurrent node collectors")
+	hotspotCmd.Flags().StringVar(&hotspotConfig.Databases, "database", "", "Filter by database names (CSV)")
+	hotspotCmd.Flags().BoolVar(&hotspotConfig.IncludeSystemDB, "include-system-db", false, "Include system databases")
 
 	registerDiagnosticFlags(indexAuditCmd, &indexAuditConfig.diagnosticBaseConfig)
-	indexAuditCmd.Flags().StringVar(&indexAuditConfig.Databases, "database", "", "数据库 CSV；与 --all-databases 二选一")
-	indexAuditCmd.Flags().BoolVar(&indexAuditConfig.AllDatabases, "all-databases", false, "审计全部非系统数据库")
-	indexAuditCmd.Flags().StringVar(&indexAuditConfig.Collections, "collection", "", "集合 CSV 过滤")
-	indexAuditCmd.Flags().StringVar(&indexAuditConfig.Checks, "checks", "", "检查 CSV: unused,redundant,space,building,consistency")
-	indexAuditCmd.Flags().BoolVar(&indexAuditConfig.IncludeSystemDB, "include-system-db", false, "包含系统数据库")
-	indexAuditCmd.Flags().DurationVar(&indexAuditConfig.MinObservation, "min-observation", 7*24*time.Hour, "零使用最短观察窗口")
-	indexAuditCmd.Flags().IntVar(&indexAuditConfig.MaxCollections, "max-collections", 500, "集合数量上限")
-	indexAuditCmd.Flags().IntVar(&indexAuditConfig.Concurrency, "concurrency", 10, "集合采集并发上限")
+	indexAuditCmd.Flags().StringVar(&indexAuditConfig.Databases, "database", "", "Select databases (CSV); mutually exclusive with --all-databases")
+	indexAuditCmd.Flags().BoolVar(&indexAuditConfig.AllDatabases, "all-databases", false, "Audit all non-system databases")
+	indexAuditCmd.Flags().StringVar(&indexAuditConfig.Collections, "collection", "", "Filter by collection names (CSV)")
+	indexAuditCmd.Flags().StringVar(&indexAuditConfig.Checks, "checks", "", "Checks to run (CSV): unused,redundant,space,building,consistency")
+	indexAuditCmd.Flags().BoolVar(&indexAuditConfig.IncludeSystemDB, "include-system-db", false, "Include system databases")
+	indexAuditCmd.Flags().DurationVar(&indexAuditConfig.MinObservation, "min-observation", 7*24*time.Hour, "Minimum observation window for zero usage")
+	indexAuditCmd.Flags().IntVar(&indexAuditConfig.MaxCollections, "max-collections", 500, "Maximum number of collections")
+	indexAuditCmd.Flags().IntVar(&indexAuditConfig.Concurrency, "concurrency", 10, "Maximum number of concurrent collection collectors")
 
 	registerDiagnosticFlags(capacityCmd, &capacityConfig.diagnosticBaseConfig)
-	capacityCmd.Flags().StringVar(&capacityConfig.Databases, "database", "", "数据库 CSV 过滤，空表示全部非系统库")
-	capacityCmd.Flags().StringVar(&capacityConfig.Collections, "collection", "", "集合 CSV 过滤")
-	capacityCmd.Flags().BoolVar(&capacityConfig.IncludeSystemDB, "include-system-db", false, "包含系统数据库")
-	capacityCmd.Flags().BoolVar(&capacityConfig.FreeStorage, "free-storage", false, "显式启用高成本 free storage 采集")
-	capacityCmd.Flags().StringVar(&capacityConfig.Snapshot, "snapshot", "", "将脱敏 JSON 快照写入本地路径")
-	capacityCmd.Flags().IntVar(&capacityConfig.MaxCollections, "max-collections", 500, "集合数量上限")
-	capacityCmd.Flags().IntVar(&capacityConfig.Concurrency, "concurrency", 10, "集合采集并发上限")
-	capacityDiffCmd.Flags().String("format", "table", "输出格式: table|json")
+	capacityCmd.Flags().StringVar(&capacityConfig.Databases, "database", "", "Filter by database names (CSV); empty selects all non-system databases")
+	capacityCmd.Flags().StringVar(&capacityConfig.Collections, "collection", "", "Filter by collection names (CSV)")
+	capacityCmd.Flags().BoolVar(&capacityConfig.IncludeSystemDB, "include-system-db", false, "Include system databases")
+	capacityCmd.Flags().BoolVar(&capacityConfig.FreeStorage, "free-storage", false, "Explicitly enable high-cost free storage collection")
+	capacityCmd.Flags().StringVar(&capacityConfig.Snapshot, "snapshot", "", "Write the redacted JSON snapshot to a local path")
+	capacityCmd.Flags().IntVar(&capacityConfig.MaxCollections, "max-collections", 500, "Maximum number of collections")
+	capacityCmd.Flags().IntVar(&capacityConfig.Concurrency, "concurrency", 10, "Maximum number of concurrent collection collectors")
+	capacityDiffCmd.Flags().String("format", "table", "Output format: table|json")
 	capacityCmd.AddCommand(capacityDiffCmd)
 	rootCmd.AddCommand(doctorCmd, opsCmd, hotspotCmd, indexAuditCmd, capacityCmd)
 }
 
 func registerDiagnosticFlags(command *cobra.Command, cfg *diagnosticBaseConfig) {
 	registerBaseFlags(command, &cfg.BaseCfg)
-	command.Flags().StringVar(&cfg.Format, "format", "table", "输出格式: table|json")
-	command.Flags().DurationVar(&cfg.Timeout, "timeout", 30*time.Second, "命令总超时")
+	command.Flags().StringVar(&cfg.Format, "format", "table", "Output format: table|json")
+	command.Flags().DurationVar(&cfg.Timeout, "timeout", 30*time.Second, "Overall command timeout")
 }
 
 func validateDiagnosticBase(cfg diagnosticBaseConfig) error {

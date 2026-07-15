@@ -91,7 +91,13 @@ required_skill_patterns=(
   ".agents/skills/project-version-release/SKILL.md|issue 是执行粒度，release 是发布粒度"
   ".agents/skills/project-version-release/SKILL.md|changeLog.md -> Unreleased"
   ".agents/skills/project-version-release/SKILL.md|GitHub Go 多平台二进制 Release"
+  ".agents/skills/project-version-release/SKILL.md|tar.gz"
+  ".agents/skills/project-version-release/SKILL.md|SHA256SUMS"
   ".agents/skills/project-version-release/references/github-go-binary-release.md|--verify-tag"
+  ".agents/skills/project-version-release/references/github-go-binary-release.md|mot.darwin.arm64.tar.gz"
+  ".agents/skills/project-version-release/references/github-go-binary-release.md|mot.windows.arm64.zip"
+  ".agents/skills/project-version-release/references/github-go-binary-release.md|SHA256SUMS"
+  ".agents/skills/project-version-release/references/github-go-binary-release.md|release-verify"
   ".agents/skills/project-version-release/scripts/project_version_release.py|Project version/release helper"
   ".agents/skills/project-version-release/references/project-version-policy.md|Project Version Policy"
   ".agents/skills/test-runbook/SKILL.md|执行副作用"
@@ -128,11 +134,27 @@ required_make_targets=(
   "harness-check"
   "harness-verify"
   "harness-review-gate"
+  "release-verify"
 )
 
 for target in "${required_make_targets[@]}"; do
   if ! rg -q "^${target}:" Makefile; then
     echo "Makefile missing target: $target" >&2
+    exit 1
+  fi
+done
+
+required_make_release_patterns=(
+  "mot.darwin.arm64.tar.gz"
+  "mot.windows.arm64.zip"
+  "SHA256SUMS"
+  "tar -C"
+  "zip -q"
+)
+
+for pattern in "${required_make_release_patterns[@]}"; do
+  if ! rg -Fq -- "$pattern" Makefile; then
+    echo "Makefile missing release pattern: $pattern" >&2
     exit 1
   fi
 done

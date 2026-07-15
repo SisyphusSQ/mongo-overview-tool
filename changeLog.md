@@ -8,6 +8,9 @@
 #### optimization:
 1. 优化 MongoDB 诊断采集的版本、拓扑、权限、数量、并发、超时和 context gate，支持分片数据节点派生连接、双快照 counter reset 处理和 free storage 显式 opt-in。
 
+#### bugFix:
+1. GitHub Release 改用 tar.gz/zip 归档资产，保留 Unix 执行权限并增加 `SHA256SUMS` 完整性校验。
+
 #### note:
 1. 保留跨 shard 索引一致性为独立任务范围；当前 `index-audit` 只执行长期零使用、前缀、空间占比和构建中索引等通用检查，不自动创建、删除或隐藏索引。
 

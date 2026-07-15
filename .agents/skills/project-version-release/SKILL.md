@@ -1,6 +1,6 @@
 ---
 name: project-version-release
-description: 当维护项目版本、changeLog、release archive 或发布策略说明，或需要为 Go 项目在 GitHub Release 上传交叉编译二进制资产时使用。
+description: 当维护项目版本、changeLog、release archive 或发布策略说明，或需要为 Go 项目在 GitHub Release 上传 tar.gz/zip 交叉编译资产和 SHA256SUMS 时使用。
 ---
 
 # Project Version Release
@@ -56,8 +56,10 @@ python3 .agents/skills/project-version-release/scripts/project_version_release.p
 
 本仓唯一 changelog 路径是 `changeLog.md`。当用户明确要求 GitHub Release 附带 Go 交叉编译二进制时，必须完整读取 [references/github-go-binary-release.md](references/github-go-binary-release.md)。
 
-- 先完成 changeLog、代码和 Makefile 的 PR 合并；二进制仅在合并后的 `main` 构建，不进入 Git。
-- 版本必须显式传给 Makefile；先验证全部资产，再创建 annotated tag，最后用 `gh release create --verify-tag` 一次性上传。
+- 先完成 changeLog、代码和 Makefile 的 PR 合并；发布资产仅在合并后的 `main` 构建，不进入 Git。
+- `make release VERSION=<version>` 必须生成四个 `tar.gz`、两个 `zip` 和 `SHA256SUMS`，并自动执行 `release-verify`；也可用 `make release-verify VERSION=<version>` 独立复核现有产物。
+- `bin/mot.*` 是构建中间文件，不得上传。GitHub Release 只能上传 `bin/release/` 下约定的七个正式资产；Unix 归档内只有根级 `mot` 且模式为 `0755`，Windows 归档内只有根级 `mot.exe`。
+- 版本必须显式传给 Makefile；先验证全部归档、架构、checksum 和本机可执行性，再创建 annotated tag，最后用 `gh release create --verify-tag` 一次性上传。
 - 缺少资产、tag 指向错误、Release 已存在或任何校验失败时立即停止；不得用 `--clobber`，不得自动覆盖或删除 tag / Release。
 - 普通 issue、仅 changeLog 收口或没有用户明确发布意图时，不得触发 GitHub 发布。
 

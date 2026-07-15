@@ -42,20 +42,45 @@ cd mongo-overview-tool
 # 本机构建（产物在 bin/mot）
 make test
 
-# 发布构建：生成 Linux、macOS（Darwin）和 Windows 的 amd64、arm64 二进制
+# 发布构建：生成 Linux、macOS（Darwin）和 Windows 的 amd64、arm64 归档及校验文件
 make release VERSION=v2.0.0
 ```
 
-发布构建会生成以下文件；Windows 文件使用 `.exe` 后缀：
+发布构建会自动执行 `release-verify`，最终可上传目录 `bin/release/` 只包含以下七个正式资产：
 
-- `bin/mot.linux.amd64`
-- `bin/mot.linux.arm64`
-- `bin/mot.darwin.amd64`
-- `bin/mot.darwin.arm64`
-- `bin/mot.windows.amd64.exe`
-- `bin/mot.windows.arm64.exe`
+- `bin/release/mot.linux.amd64.tar.gz`
+- `bin/release/mot.linux.arm64.tar.gz`
+- `bin/release/mot.darwin.amd64.tar.gz`
+- `bin/release/mot.darwin.arm64.tar.gz`
+- `bin/release/mot.windows.amd64.zip`
+- `bin/release/mot.windows.arm64.zip`
+- `bin/release/SHA256SUMS`
 
-构建产物位于 `bin/` 目录下，可通过 `make deploy` 将本机构建安装到 `/usr/local/bin/`。
+`bin/mot.*` 是构建中间文件，不应上传或直接分发。可用同一版本独立复核现有归档：
+
+```bash
+make release-verify VERSION=v2.0.0
+```
+
+下载全部六个归档和 `SHA256SUMS` 后，macOS 使用 `shasum -a 256 -c SHA256SUMS`，Linux 使用 `sha256sum -c SHA256SUMS` 校验完整性。
+
+macOS 或 Linux 解压安装示例（按实际系统和架构替换归档名）：
+
+```bash
+mkdir -p "$HOME/.local/bin" /tmp/mot-install
+tar -xzf mot.darwin.arm64.tar.gz -C /tmp/mot-install
+install -m 0755 /tmp/mot-install/mot "$HOME/.local/bin/mot"
+"$HOME/.local/bin/mot" -h
+```
+
+Windows PowerShell 解压示例：
+
+```powershell
+Expand-Archive -Path .\mot.windows.amd64.zip -DestinationPath .\mot
+.\mot\mot.exe -h
+```
+
+源码构建产物位于 `bin/` 目录下，可通过 `make deploy` 将本机构建安装到 `/usr/local/bin/`。
 
 ## 连接配置
 
