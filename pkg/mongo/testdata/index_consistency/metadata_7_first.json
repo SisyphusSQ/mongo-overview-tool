@@ -1,0 +1,21 @@
+{
+  "cursor": {
+    "id": {"$numberLong": "42"},
+    "ns": "app.$cmd.aggregate",
+    "firstBatch": [
+      {
+        "type": "InconsistentIndex",
+        "description": "fixture description is intentionally ignored",
+        "details": {
+          "namespace": "app.orders",
+          "info": {
+            "indexName": "tenant_1",
+            "missingFromShards": ["shard-b"],
+            "inconsistentProperties": [{"k": "unique", "v": []}]
+          }
+        }
+      }
+    ]
+  },
+  "ok": {"$numberInt": "1"}
+}

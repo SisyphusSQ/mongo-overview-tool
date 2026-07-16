@@ -109,6 +109,34 @@ func TestDecodeTopSnapshotPreservesNamespaceCounters(t *testing.T) {
 	}
 }
 
+func TestDecodeTopSnapshotSkipsScalarMetadata(t *testing.T) {
+	// 场景：真实 top.totals 会混入 note 等标量元数据；它们不能导致解码失败，也不能成为伪 namespace。
+	metrics := bson.D{
+		{Key: "queries", Value: bson.D{{Key: "time", Value: int64(20)}, {Key: "count", Value: int64(2)}}},
+		{Key: "insert", Value: bson.D{{Key: "time", Value: int64(30)}, {Key: "count", Value: int64(3)}}},
+	}
+	payload, err := bson.Marshal(bson.D{{Key: "totals", Value: bson.D{
+		{Key: "note", Value: "all times are in microseconds"},
+		{Key: "db.c", Value: metrics},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := decodeTopSnapshot(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Namespaces) != 1 {
+		t.Fatalf("namespaces = %#v, want only db.c", result.Namespaces)
+	}
+	if _, ok := result.Namespaces["note"]; ok {
+		t.Fatal("scalar top metadata must not become a namespace")
+	}
+	if got := result.Namespaces["db.c"]; got.ReadCount != 2 || got.WriteCount != 3 {
+		t.Fatalf("db.c counters = %#v", got)
+	}
+}
+
 func TestCurrentOperationFallbackAppliesNamespaceBoundary(t *testing.T) {
 	// 场景：旧 currentOp command fallback 也必须遵守 namespace/database 过滤，不能扩大可见范围。
 	query := CurrentOperationsQuery{Databases: []string{"app"}}

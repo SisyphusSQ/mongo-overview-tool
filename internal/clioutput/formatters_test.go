@@ -137,6 +137,57 @@ func TestPrintAllDiagnosticCommandsGolden(t *testing.T) {
 	}
 }
 
+func TestPrintIndexConsistencyGoldenAndRedaction(t *testing.T) {
+	// 场景：一致性 table/JSON 稳定展示四态 summary、coverage、fallback 和安全 fingerprint，禁止原始定义泄漏。
+	result := &mot.IndexAuditResult{
+		CollectedAt:        time.Date(2026, 7, 16, 8, 0, 0, 0, time.UTC),
+		ConsistencySummary: mot.IndexConsistencySummary{Inconsistent: 1},
+		Collections: []mot.CollectionIndexAudit{{
+			Namespace: "app.orders", Sharded: true, State: mot.IndexConsistencyInconsistent,
+			Strategy: mot.IndexConsistencyDirectListIndexes, ExpectedShards: []string{"shard-a", "shard-b"},
+			ObservedShards: []string{"shard-a"}, Coverage: mot.IndexConsistencyCoverageIncomplete,
+			Fallback: &mot.IndexConsistencyFallback{From: mot.IndexConsistencyIndexStats, To: mot.IndexConsistencyDirectListIndexes, ReasonCode: "incomplete_coverage"},
+			Differences: []mot.IndexConsistencyDifference{{
+				Code: "index.missing_on_shard", IndexName: "tenant_1", Shards: []string{"shard-b"},
+				Key: []mot.IndexKeyField{{Field: "tenant", Order: "1"}}, Fingerprint: "safe-fingerprint",
+			}},
+			Indexes: []mot.IndexObservation{},
+		}},
+		Findings: []mot.DiagnosticFinding{{
+			Code: "index.missing_on_shard", Severity: mot.SeverityWarning,
+			Scope: mot.FindingScope{Type: mot.ScopeNamespace, Namespace: "app.orders"}, Summary: "索引在部分 expected shards 上缺失",
+		}},
+		CollectorStatuses: []mot.CollectorStatus{{
+			Name: "index_consistency_direct", State: mot.CapabilityFailed,
+			Scope: mot.FindingScope{Type: mot.ScopeNamespace, Namespace: "app.orders"}, ReasonCode: "incomplete_coverage",
+		}},
+	}
+	for _, tt := range []struct {
+		format string
+		golden string
+	}{
+		{format: FormatTable, golden: "diagnostics_index_consistency.golden"},
+		{format: FormatJSON, golden: "diagnostics_index_consistency.json.golden"},
+	} {
+		var output bytes.Buffer
+		if err := PrintDiagnosticResult(&output, result, tt.format); err != nil {
+			t.Fatal(err)
+		}
+		want, err := os.ReadFile(filepath.Join("testdata", tt.golden))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if output.String() != string(want) {
+			t.Fatalf("%s output mismatch\n--- got ---\n%s\n--- want ---\n%s", tt.format, output.String(), want)
+		}
+		for _, forbidden := range []string{"private-value", "partialFilterExpression", "mongodb://", "server detail"} {
+			if strings.Contains(output.String(), forbidden) {
+				t.Fatalf("%s output leaked %q", tt.format, forbidden)
+			}
+		}
+	}
+}
+
 func TestPrintDiagnosticPartialAndNoResultGolden(t *testing.T) {
 	// 场景：部分覆盖与完全无结果都必须保留 collector status，table 不能误报 healthy。
 	withColorDisabled(t)

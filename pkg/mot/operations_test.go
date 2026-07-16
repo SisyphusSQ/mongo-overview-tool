@@ -65,6 +65,39 @@ func TestCurrentOperationsUnauthorizedAllUsersDowngradesToCurrentUser(t *testing
 	}
 }
 
+func TestCollectCurrentOperationsUsesCommandFallbackForWireVersionFive(t *testing.T) {
+	// 场景：MongoDB 3.4 的 wire version 5 不支持 $currentOp aggregation，必须直接走只读 command fallback。
+	var aggregationCalls int
+	var commandCalls int
+	query := pkgmongo.CurrentOperationsQuery{AllUsers: true}
+	operations, source, err := collectCurrentOperationsForWireVersion(
+		5,
+		query,
+		func(pkgmongo.CurrentOperationsQuery) ([]pkgmongo.CurrentOperationSnapshot, error) {
+			aggregationCalls++
+			return nil, nil
+		},
+		func(pkgmongo.CurrentOperationsQuery) ([]pkgmongo.CurrentOperationSnapshot, error) {
+			commandCalls++
+			return []pkgmongo.CurrentOperationSnapshot{{Namespace: "app.orders"}}, nil
+		},
+	)
+	if err != nil || source != "command_fallback" || len(operations) != 1 {
+		t.Fatalf("operations=%#v source=%q err=%v", operations, source, err)
+	}
+	if aggregationCalls != 0 || commandCalls != 1 {
+		t.Fatalf("aggregationCalls=%d commandCalls=%d", aggregationCalls, commandCalls)
+	}
+}
+
+func TestUnsupportedCurrentOpAggregationIncludesLegacyInvalidNamespace(t *testing.T) {
+	// 场景：兼容代理或回移版本返回 Location17138 时，也必须按不支持 aggregation 降级到 currentOp command。
+	err := drivermongo.CommandError{Code: 17138, Message: "Invalid input namespace, admin"}
+	if !isUnsupportedCurrentOpAggregation(err) {
+		t.Fatal("Location17138 must trigger currentOp command fallback")
+	}
+}
+
 func int64Pointer(value int64) *int64 {
 	return &value
 }

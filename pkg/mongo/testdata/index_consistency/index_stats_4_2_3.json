@@ -1,0 +1,6 @@
+{
+  "name": "tenant_1",
+  "host": "fixture-host",
+  "accesses": {"ops": {"$numberLong": "0"}, "since": {"$date": {"$numberLong": "0"}}},
+  "key": {"tenant": {"$numberInt": "1"}}
+}

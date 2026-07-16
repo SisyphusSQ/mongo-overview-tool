@@ -1,0 +1,17 @@
+{
+  "cursor": {
+    "id": {"$numberLong": "0"},
+    "ns": "app.$cmd.aggregate",
+    "nextBatch": [
+      {
+        "type": "MissingShardKeyIndex",
+        "details": {
+          "namespace": "app.orders",
+          "shard": "shard-a",
+          "shardKey": {"fixture-business-key": {"$numberInt": "1"}}
+        }
+      }
+    ]
+  },
+  "ok": {"$numberInt": "1"}
+}

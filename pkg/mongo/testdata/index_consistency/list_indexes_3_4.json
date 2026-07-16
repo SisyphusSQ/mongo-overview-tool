@@ -1,0 +1,14 @@
+{
+  "v": {"$numberInt": "2"},
+  "key": {
+    "tenant": {"$numberInt": "1"},
+    "createdAt": {"$numberInt": "-1"}
+  },
+  "name": "tenant_1_createdAt_-1",
+  "unique": true,
+  "sparse": false,
+  "expireAfterSeconds": {"$numberLong": "86400"},
+  "storageEngine": {
+    "wiredTiger": {"configString": "block_compressor=zstd"}
+  }
+}

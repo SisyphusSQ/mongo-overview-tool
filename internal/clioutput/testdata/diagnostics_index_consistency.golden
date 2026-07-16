@@ -1,0 +1,12 @@
+MongoDB Index Audit
+Consistency Summary: consistent=0 inconsistent=1 inconclusive=0 skipped=0
+NAMESPACE	SHARDED	STATE	STRATEGY	COVERAGE	EXPECTED	OBSERVED	FALLBACK
+app.orders	true	inconsistent	direct_list_indexes	incomplete	shard-a,shard-b	shard-a	index_stats->direct_list_indexes(incomplete_coverage)
+Index Differences:
+NAMESPACE	CODE	INDEX	SHARDS	KEY	FINGERPRINT	FIELDS	SOURCE
+app.orders	index.missing_on_shard	tenant_1	shard-b	tenant:1	safe-fingerprint		
+NAMESPACE	INDEX	SHARD	HOST	OPS	SINCE	SIZE
+Findings:
+- WARNING	index.missing_on_shard	app.orders	索引在部分 expected shards 上缺失
+Collector Status:
+- index_consistency_direct	failed	app.orders	incomplete_coverage

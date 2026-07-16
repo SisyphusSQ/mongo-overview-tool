@@ -68,24 +68,43 @@ type IndexObservation struct {
 }
 
 type CollectionIndexAudit struct {
-	Namespace        string              `json:"namespace"`
-	DataSizeBytes    *int64              `json:"dataSizeBytes,omitempty"`
-	IndexSizeBytes   *int64              `json:"indexSizeBytes,omitempty"`
-	IndexToDataRatio *float64            `json:"indexToDataRatio,omitempty"`
-	Indexes          []IndexObservation  `json:"indexes"`
-	Findings         []DiagnosticFinding `json:"findings"`
+	Namespace           string                       `json:"namespace"`
+	Sharded             bool                         `json:"sharded"`
+	State               IndexConsistencyState        `json:"state,omitempty"`
+	Strategy            IndexConsistencyStrategy     `json:"strategy,omitempty"`
+	ExpectedShards      []string                     `json:"expectedShards,omitempty"`
+	ObservedShards      []string                     `json:"observedShards,omitempty"`
+	Coverage            IndexConsistencyCoverage     `json:"coverage,omitempty"`
+	Fallback            *IndexConsistencyFallback    `json:"fallback,omitempty"`
+	Differences         []IndexConsistencyDifference `json:"differences,omitempty"`
+	ConsistencyStatuses []CollectorStatus            `json:"consistencyStatuses,omitempty"`
+	DataSizeBytes       *int64                       `json:"dataSizeBytes,omitempty"`
+	IndexSizeBytes      *int64                       `json:"indexSizeBytes,omitempty"`
+	IndexToDataRatio    *float64                     `json:"indexToDataRatio,omitempty"`
+	Indexes             []IndexObservation           `json:"indexes"`
+	Findings            []DiagnosticFinding          `json:"findings"`
 }
 
 type IndexAuditResult struct {
-	CollectedAt       time.Time              `json:"collectedAt"`
-	Collections       []CollectionIndexAudit `json:"collections"`
-	Findings          []DiagnosticFinding    `json:"findings"`
-	CollectorStatuses []CollectorStatus      `json:"collectorStatuses"`
+	CollectedAt        time.Time               `json:"collectedAt"`
+	ConsistencySummary IndexConsistencySummary `json:"consistencySummary"`
+	Collections        []CollectionIndexAudit  `json:"collections"`
+	Findings           []DiagnosticFinding     `json:"findings"`
+	CollectorStatuses  []CollectorStatus       `json:"collectorStatuses"`
 }
 
-type indexCollectionRef struct{ Database, Collection string }
+type indexCollectionRef struct {
+	Database   string
+	Collection string
+	Type       string
+}
 
-// IndexAudit 执行通用索引使用、定义和空间审计；跨 shard 一致性由 TOO-304 实现。
+type indexCollectionMetadata struct {
+	Name string `bson:"name"`
+	Type string `bson:"type"`
+}
+
+// IndexAudit 执行通用索引使用、定义、空间和跨 shard 一致性审计。
 func (c *Client) IndexAudit(ctx context.Context, opts IndexAuditOptions) (result *IndexAuditResult, err error) {
 	opts, err = normalizeIndexAuditOptions(opts)
 	if err != nil {
@@ -95,56 +114,83 @@ func (c *Client) IndexAudit(ctx context.Context, opts IndexAuditOptions) (result
 		return nil, err
 	}
 	defer func() { err = mapContextError(err) }()
-	cluster, err := pkgmongo.DetectCluster(ctx, c.conn)
+	cluster, err := pkgmongo.DetectClusterTopology(ctx, c.conn)
 	if err != nil {
 		return nil, err
 	}
 	result = &IndexAuditResult{CollectedAt: time.Now().UTC()}
-	if gate, allowed := diagnosticCapabilityGate("index_usage", convertClusterType(cluster.Type), cluster.MaxWireVersion, true); !allowed {
-		result.CollectorStatuses = []CollectorStatus{gate}
-		return result, nil
+	consistencyRequested := includesIndexCheck(opts.Checks, IndexCheckConsistency)
+	generalRequested := includesGeneralIndexCheck(opts.Checks)
+	if err := validateIndexConsistencyTopology(cluster.Type, consistencyRequested); err != nil {
+		return nil, err
+	}
+	if generalRequested {
+		if gate, allowed := diagnosticCapabilityGate("index_usage", convertClusterType(cluster.Type), cluster.MaxWireVersion, true); !allowed {
+			result.CollectorStatuses = []CollectorStatus{gate}
+			return result, nil
+		}
 	}
 	refs, err := c.indexCollectionRefs(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
+	if len(refs) == 0 {
+		return nil, invalidOptions("no collections selected")
+	}
 	if len(refs) > opts.MaxCollections {
 		return nil, invalidOptions("selected %d collections, exceeds max %d", len(refs), opts.MaxCollections)
 	}
-	targets, _, discoveryErrors := c.discoverHotspotTargets(ctx, cluster.Type)
-	if includesIndexCheck(opts.Checks, IndexCheckConsistency) {
-		result.CollectorStatuses = append(result.CollectorStatuses, CollectorStatus{
-			Name: "index_consistency", State: CapabilitySkipped, Scope: FindingScope{Type: ScopeCluster},
-			ReasonCode: "related_issue_too_304", Message: "跨 shard 索引一致性由 TOO-304 实现",
-		})
-	}
-	var mu sync.Mutex
+	collectionsByNamespace := make(map[string]CollectionIndexAudit, len(refs))
 	var collectorErrors []error
-	group, groupCtx := errgroup.WithContext(ctx)
-	limit := semaphore.NewWeighted(int64(opts.Concurrency))
-	for _, ref := range refs {
-		if acquireErr := acquireDiagnosticSlot(groupCtx, limit); acquireErr != nil {
-			mu.Lock()
-			collectorErrors = append(collectorErrors, acquireErr)
-			mu.Unlock()
-			break
+	if consistencyRequested {
+		collections, statuses, consistencyErrors := collectIndexConsistency(ctx, refs, opts, clientIndexConsistencySource{client: c})
+		if len(collections) == 0 && len(consistencyErrors) > 0 {
+			return nil, errors.Join(consistencyErrors...)
 		}
-		ref := ref
-		group.Go(func() error {
-			defer limit.Release(1)
-			collection, statuses, collectErrors := c.collectIndexAuditCollection(groupCtx, ref, targets, opts, result.CollectedAt, cluster.Type == pkgmongo.ClusterRepl)
-			mu.Lock()
-			result.Collections = append(result.Collections, collection)
-			result.Findings = append(result.Findings, collection.Findings...)
-			result.CollectorStatuses = append(result.CollectorStatuses, statuses...)
-			collectorErrors = append(collectorErrors, collectErrors...)
-			mu.Unlock()
-			return nil
-		})
+		for _, collection := range collections {
+			collectionsByNamespace[collection.Namespace] = collection
+		}
+		result.CollectorStatuses = append(result.CollectorStatuses, statuses...)
+		collectorErrors = append(collectorErrors, consistencyErrors...)
 	}
-	_ = group.Wait()
-	collectorErrors = append(collectorErrors, discoveryErrors...)
+	if generalRequested {
+		targets, targetStatuses, discoveryErrors := c.discoverHotspotTargets(ctx, cluster.Type)
+		result.CollectorStatuses = append(result.CollectorStatuses, targetStatuses...)
+		collectorErrors = append(collectorErrors, discoveryErrors...)
+		var mu sync.Mutex
+		group, groupCtx := errgroup.WithContext(ctx)
+		limit := semaphore.NewWeighted(int64(opts.Concurrency))
+		for _, ref := range refs {
+			if ref.Type != "collection" {
+				continue
+			}
+			if acquireErr := acquireDiagnosticSlot(groupCtx, limit); acquireErr != nil {
+				mu.Lock()
+				collectorErrors = append(collectorErrors, acquireErr)
+				mu.Unlock()
+				break
+			}
+			ref := ref
+			group.Go(func() error {
+				defer limit.Release(1)
+				collection, statuses, collectErrors := c.collectIndexAuditCollection(groupCtx, ref, targets, opts, result.CollectedAt, cluster.Type == pkgmongo.ClusterRepl)
+				mu.Lock()
+				collectionsByNamespace[collection.Namespace] = mergeIndexAuditCollections(collectionsByNamespace[collection.Namespace], collection)
+				result.CollectorStatuses = append(result.CollectorStatuses, statuses...)
+				collectorErrors = append(collectorErrors, collectErrors...)
+				mu.Unlock()
+				return nil
+			})
+		}
+		_ = group.Wait()
+	}
+	result.Collections = make([]CollectionIndexAudit, 0, len(collectionsByNamespace))
+	for _, collection := range collectionsByNamespace {
+		result.Collections = append(result.Collections, collection)
+		result.Findings = append(result.Findings, collection.Findings...)
+	}
 	sort.SliceStable(result.Collections, func(i, j int) bool { return result.Collections[i].Namespace < result.Collections[j].Namespace })
+	result.ConsistencySummary = summarizeIndexConsistency(result.Collections)
 	sanitizeAndSortFindings(result.Findings)
 	sortCollectorStatuses(result.CollectorStatuses)
 	if len(collectorErrors) > 0 {
@@ -154,6 +200,35 @@ func (c *Client) IndexAudit(ctx context.Context, opts IndexAuditOptions) (result
 		return result, newDiagnosticPartialError("index-audit", result, errors.Join(collectorErrors...))
 	}
 	return result, nil
+}
+
+func validateIndexConsistencyTopology(clusterType pkgmongo.ClusterType, requested bool) error {
+	if requested && clusterType != pkgmongo.ClusterShard {
+		return fmt.Errorf("%w: index consistency requires a mongos connection", ErrUnsupportedTopology)
+	}
+	return nil
+}
+
+func includesGeneralIndexCheck(checks []IndexAuditCheck) bool {
+	for _, check := range checks {
+		if check != IndexCheckConsistency {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeIndexAuditCollections(consistency, general CollectionIndexAudit) CollectionIndexAudit {
+	if consistency.Namespace == "" {
+		return general
+	}
+	consistency.DataSizeBytes = general.DataSizeBytes
+	consistency.IndexSizeBytes = general.IndexSizeBytes
+	consistency.IndexToDataRatio = general.IndexToDataRatio
+	consistency.Indexes = append(consistency.Indexes, general.Indexes...)
+	consistency.Findings = append(consistency.Findings, general.Findings...)
+	sanitizeAndSortFindings(consistency.Findings)
+	return consistency
 }
 
 func normalizeIndexAuditOptions(opts IndexAuditOptions) (IndexAuditOptions, error) {
@@ -205,35 +280,16 @@ func (c *Client) indexCollectionRefs(ctx context.Context, opts IndexAuditOptions
 		if listErr != nil {
 			return nil, listErr
 		}
-		var metadata struct {
-			Name string `bson:"name"`
-			Type string `bson:"type"`
-		}
+		var metadataValues []indexCollectionMetadata
 		for cursor.Next(ctx) {
-			metadata = struct {
-				Name string `bson:"name"`
-				Type string `bson:"type"`
-			}{}
+			var metadata indexCollectionMetadata
 			if decodeErr := cursor.Decode(&metadata); decodeErr != nil {
 				closeCtx, cancel := cleanupContext(ctx)
 				_ = cursor.Close(closeCtx)
 				cancel()
 				return nil, decodeErr
 			}
-			if metadata.Type == "view" {
-				continue
-			}
-			collection := metadata.Name
-			if len(opts.Collections) > 0 && !stringIncluded(opts.Collections, collection) {
-				continue
-			}
-			refs = append(refs, indexCollectionRef{database, collection})
-			if opts.MaxCollections > 0 && len(refs) > opts.MaxCollections {
-				closeCtx, cancel := cleanupContext(ctx)
-				_ = cursor.Close(closeCtx)
-				cancel()
-				return nil, invalidOptions("selected collections exceed max %d", opts.MaxCollections)
-			}
+			metadataValues = append(metadataValues, metadata)
 		}
 		if cursorErr := cursor.Err(); cursorErr != nil {
 			closeCtx, cancel := cleanupContext(ctx)
@@ -244,11 +300,29 @@ func (c *Client) indexCollectionRefs(ctx context.Context, opts IndexAuditOptions
 		closeCtx, cancel := cleanupContext(ctx)
 		_ = cursor.Close(closeCtx)
 		cancel()
+		refs = append(refs, selectIndexCollectionRefs(database, metadataValues, opts.Collections)...)
+		if opts.MaxCollections > 0 && len(refs) > opts.MaxCollections {
+			return nil, invalidOptions("selected collections exceed max %d", opts.MaxCollections)
+		}
 	}
 	sort.SliceStable(refs, func(i, j int) bool {
 		return refs[i].Database+"."+refs[i].Collection < refs[j].Database+"."+refs[j].Collection
 	})
 	return refs, nil
+}
+
+func selectIndexCollectionRefs(database string, metadata []indexCollectionMetadata, collections []string) []indexCollectionRef {
+	refs := make([]indexCollectionRef, 0, len(metadata))
+	for _, item := range metadata {
+		if len(collections) > 0 && !stringIncluded(collections, item.Name) {
+			continue
+		}
+		refs = append(refs, indexCollectionRef{Database: database, Collection: item.Name, Type: item.Type})
+	}
+	sort.SliceStable(refs, func(i, j int) bool {
+		return refs[i].Database+"."+refs[i].Collection < refs[j].Database+"."+refs[j].Collection
+	})
+	return refs
 }
 
 func (c *Client) collectIndexAuditCollection(ctx context.Context, ref indexCollectionRef, targets []hotspotTarget, opts IndexAuditOptions, now time.Time, ownershipKnown bool) (CollectionIndexAudit, []CollectorStatus, []error) {
