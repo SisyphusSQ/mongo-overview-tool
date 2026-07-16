@@ -150,7 +150,7 @@ var hotspotCmd = &cobra.Command{
 
 var indexAuditCmd = &cobra.Command{
 	Use:   "index-audit",
-	Short: "Audit index usage, definitions, and storage candidates",
+	Short: "Audit sharded index consistency, usage, definitions, and storage candidates",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if err := validateDiagnosticBase(indexAuditConfig.diagnosticBaseConfig); err != nil {
 			return err
@@ -176,7 +176,7 @@ var indexAuditCmd = &cobra.Command{
 		}
 		defer closeSDKClient(client)
 		result, operationErr := client.IndexAudit(ctx, mot.IndexAuditOptions{Databases: splitCSV(indexAuditConfig.Databases), AllDatabases: indexAuditConfig.AllDatabases, Collections: splitCSV(indexAuditConfig.Collections), Checks: checks, IncludeSystemDB: indexAuditConfig.IncludeSystemDB, MinObservation: indexAuditConfig.MinObservation, MaxCollections: indexAuditConfig.MaxCollections, Concurrency: indexAuditConfig.Concurrency})
-		return printDiagnosticAndError(cmd, result, indexAuditConfig.Format, operationErr)
+		return printIndexAuditAndError(cmd, result, indexAuditConfig.Format, operationErr)
 	},
 }
 
@@ -356,12 +356,39 @@ func printDiagnosticAndError(cmd *cobra.Command, result any, format string, oper
 	return nil
 }
 
+func printIndexAuditAndError(cmd *cobra.Command, result *mot.IndexAuditResult, format string, operationErr error) error {
+	if result != nil {
+		if err := clioutput.PrintDiagnosticResult(cmd.OutOrStdout(), result, format); err != nil {
+			return err
+		}
+	}
+	if operationErr != nil && errors.Is(operationErr, mot.ErrCancelled) {
+		return safeDiagnosticCommandError(operationErr)
+	}
+	if operationErr != nil && (!errors.Is(operationErr, mot.ErrPartialResult) || result == nil || !hasIndexConsistencyResult(result)) {
+		return safeDiagnosticCommandError(operationErr)
+	}
+	return nil
+}
+
+func hasIndexConsistencyResult(result *mot.IndexAuditResult) bool {
+	if result == nil {
+		return false
+	}
+	for _, collection := range result.Collections {
+		if collection.State != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func safeDiagnosticCommandError(operationErr error) error {
 	switch {
-	case errors.Is(operationErr, mot.ErrPartialResult):
-		return fmt.Errorf("%w: 部分 collector 未完成，已输出可用结果", mot.ErrPartialResult)
 	case errors.Is(operationErr, mot.ErrCancelled):
 		return fmt.Errorf("%w", mot.ErrCancelled)
+	case errors.Is(operationErr, mot.ErrPartialResult):
+		return fmt.Errorf("%w: 部分 collector 未完成，已输出可用结果", mot.ErrPartialResult)
 	case errors.Is(operationErr, mot.ErrUnsupportedTopology):
 		return fmt.Errorf("%w", mot.ErrUnsupportedTopology)
 	default:

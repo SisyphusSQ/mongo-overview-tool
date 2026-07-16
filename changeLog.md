@@ -4,6 +4,7 @@
 #### feature:
 1. 新增 `doctor`、`ops`、`hotspot`、`index-audit` 和 `capacity` 只读诊断命令及对应 Go SDK，支持结构化 finding、collector status、部分结果、脱敏 table/JSON、容量快照与纯离线 diff。
 2. 完善慢日志洞察，追加 plan summary、扫描返回比、planning/CPU、匿名 appName、error 和 COLLSCAN 证据，同时保持既有 sort、query hash 与 legacy 标识兼容。
+3. 为 `index-audit` 增加 MongoDB 3.4–7.x 分片集群全库索引一致性检查，支持 direct `listIndexes`、`$indexStats`、7.x 官方 metadata cursor、fallback、coverage、二次确认及稳定的 SDK/table/JSON 结果。
 
 #### optimization:
 1. 优化 MongoDB 诊断采集的版本、拓扑、权限、数量、并发、超时和 context gate，支持分片数据节点派生连接、双快照 counter reset 处理和 free storage 显式 opt-in。
@@ -12,7 +13,7 @@
 1. GitHub Release 改用 tar.gz/zip 归档资产，保留 Unix 执行权限并增加 `SHA256SUMS` 完整性校验。
 
 #### note:
-1. 保留跨 shard 索引一致性为独立任务范围；当前 `index-audit` 只执行长期零使用、前缀、空间占比和构建中索引等通用检查，不自动创建、删除或隐藏索引。
+1. `index-audit consistency` 仅执行只读检查，不自动创建、删除、隐藏或修改索引；真实 MongoDB 3.4/7.x 分片环境验证继续受 manual gate 约束。
 
 ### v2.0.0(20260710)
 #### feature:

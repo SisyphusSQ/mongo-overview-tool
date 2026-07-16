@@ -1,0 +1,11 @@
+{
+  "name": "tenant_1",
+  "shard": "shard-a",
+  "building": true,
+  "spec": {
+    "v": {"$numberInt": "2"},
+    "key": {"tenant": {"$numberInt": "1"}},
+    "name": "tenant_1",
+    "partialFilterExpression": {"state": "fixture-redacted"}
+  }
+}

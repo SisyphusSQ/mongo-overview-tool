@@ -1,9 +1,25 @@
 package mot
 
 import (
+	"errors"
 	"testing"
 	"time"
+
+	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
 )
+
+func TestValidateIndexConsistencyTopologyRequiresMongosOnlyWhenRequested(t *testing.T) {
+	// 场景：默认 consistency 在副本集入口必须整体拒绝；显式通用 checks 保持既有副本集能力。
+	if err := validateIndexConsistencyTopology(pkgmongo.ClusterRepl, false); err != nil {
+		t.Fatalf("general-only topology error = %v", err)
+	}
+	if err := validateIndexConsistencyTopology(pkgmongo.ClusterShard, true); err != nil {
+		t.Fatalf("sharded consistency topology error = %v", err)
+	}
+	if err := validateIndexConsistencyTopology(pkgmongo.ClusterRepl, true); !errors.Is(err, ErrUnsupportedTopology) {
+		t.Fatalf("replica consistency error = %v, want ErrUnsupportedTopology", err)
+	}
+}
 
 func TestEvaluateIndexAuditRequiresCompleteObservationForUnused(t *testing.T) {
 	// 场景：部分节点不可达时，即使已返回节点 ops 为 0，也只能给 inconclusive。

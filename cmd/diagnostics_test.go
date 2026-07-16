@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -71,6 +72,43 @@ func TestDiagnosticCLIErrorDoesNotExposeServerDetail(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "internal") {
 		t.Fatalf("error leaked server detail: %v", err)
+	}
+}
+
+func TestIndexAuditPartialResultRendersAndReturnsSuccess(t *testing.T) {
+	// 场景：index-audit 的可渲染 partial coverage 是审计结果，只有该命令应在输出后返回 0。
+	command := &cobra.Command{}
+	var output bytes.Buffer
+	command.SetOut(&output)
+	result := &mot.IndexAuditResult{Collections: []mot.CollectionIndexAudit{{
+		Namespace: "app.orders", State: mot.IndexConsistencyInconclusive, Coverage: mot.IndexConsistencyCoverageIncomplete,
+	}}}
+	err := printIndexAuditAndError(command, result, "json", &mot.DiagnosticPartialError{
+		Op: "index-audit", Result: result, Err: errors.New("private server detail"),
+	})
+	if err != nil {
+		t.Fatalf("printIndexAuditAndError() = %v, want nil", err)
+	}
+	if !strings.Contains(output.String(), "app.orders") || strings.Contains(output.String(), "private server detail") {
+		t.Fatalf("output = %s", output.String())
+	}
+
+	cancelled := printIndexAuditAndError(command, result, "json", fmt.Errorf("%w", mot.ErrCancelled))
+	if !errors.Is(cancelled, mot.ErrCancelled) {
+		t.Fatalf("cancelled error = %v", cancelled)
+	}
+	cancelledPartial := printIndexAuditAndError(command, result, "json", fmt.Errorf("%w: %w", mot.ErrCancelled, &mot.DiagnosticPartialError{
+		Op: "index-audit", Result: result, Err: context.Canceled,
+	}))
+	if !errors.Is(cancelledPartial, mot.ErrCancelled) {
+		t.Fatalf("cancelled partial error = %v", cancelledPartial)
+	}
+	generalOnly := &mot.IndexAuditResult{Collections: []mot.CollectionIndexAudit{{Namespace: "app.orders"}}}
+	generalErr := printIndexAuditAndError(command, generalOnly, "json", &mot.DiagnosticPartialError{
+		Op: "index-audit", Result: generalOnly, Err: errors.New("general collector failure"),
+	})
+	if !errors.Is(generalErr, mot.ErrPartialResult) {
+		t.Fatalf("general-only partial error = %v, want ErrPartialResult", generalErr)
 	}
 }
 

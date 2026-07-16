@@ -9,7 +9,7 @@
 - **分片检查 (`check-shard`)**: 检查集合是否已分片。
 - **慢日志分析 (`slowlog`)**: 聚合分析慢查询日志，支持按执行次数、最大耗时等排序。
 - **诊断巡检 (`doctor` / `ops` / `hotspot`)**: 以结构化 finding 和 collector status 展示健康风险、活跃操作与短周期热点。
-- **索引与容量审计 (`index-audit` / `capacity`)**: 给出通用索引复核候选、脱敏容量快照和纯离线差异，不自动执行索引或存储变更。
+- **索引与容量审计 (`index-audit` / `capacity`)**: 给出 MongoDB 3.4–7.x 分片集合索引一致性、通用索引复核候选、脱敏容量快照和纯离线差异，不自动执行索引或存储变更。
 - **批量操作 (`bulk-delete` / `bulk-update`)**: 支持流控的批量删除和更新操作，减少对线上业务的影响。
 
 ## Harness 控制面
@@ -132,7 +132,7 @@ go test -tags=integration -count=1 -v \
   -run '^TestLiveSDKReadOnlyE2E$' ./pkg/mot
 ```
 
-该 live E2E 还覆盖 `Doctor`、`CurrentOperations`、`Hotspot`、通用 `IndexAudit`、`Capacity` 和增强后的 slowlog insight。它会读取真实副本集或分片数据节点的诊断统计，但不会创建数据、修改 Profiler、变更索引或执行维护命令。
+该 live E2E 还覆盖 `Doctor`、`CurrentOperations`、`Hotspot`、通用 `IndexAudit`、`Capacity` 和增强后的 slowlog insight。分片集合索引一致性使用独立的 `TestLiveIndexConsistencyReadOnlyE2E` 和预置 namespace 环境变量。测试会读取真实 routing metadata、shard 索引定义和诊断统计，但不会创建数据、修改 Profiler、变更索引或执行维护命令。
 
 ### 1. 命令行参数（推荐）
 
@@ -253,9 +253,12 @@ mot ops --uri '<mongodb-uri>' --min-duration 2s --limit 100
 # 默认使用 10 秒双快照，按实际间隔计算 namespace rate
 mot hotspot --uri '<mongodb-uri>' --database app --top 10
 
-# database 与 all-databases 二选一；只给人工复核候选
+# database 与 all-databases 二选一；默认 checks 包含 consistency
+mot index-audit --uri '<mongodb-uri>' --database app --format table
+
+# 只运行跨 shard 索引一致性，不运行 usage/capacity collector
 mot index-audit --uri '<mongodb-uri>' --database app \
-  --checks unused,redundant,space,building
+  --checks consistency --collection orders --format json
 
 # free storage 是显式高成本 opt-in；snapshot 只包含脱敏结构化结果
 mot capacity --uri '<mongodb-uri>' --database app \
@@ -267,7 +270,9 @@ mot capacity diff ./capacity-before.json ./capacity-after.json
 
 说明：
 
-- `index-audit` 的跨 shard 索引一致性检查由独立任务承接；当前命令只提供公共审计骨架与长期零使用、前缀、空间、构建中检查。
+- `index-audit consistency` 只支持通过 `mongos` 检查 MongoDB 3.4–7.x 分片集群；3.4–4.2.3 使用 shard 直连 `listIndexes`，4.2.4–6.x 优先 `$indexStats`，7.x 优先 `checkMetadataConsistency(checkIndexes=true)`，证据不完整时按状态和 context 安全降级。
+- collection 结果分别给出 `consistent`、`inconsistent`、`inconclusive` 或 `skipped`，同时保留 expected/observed shards、coverage、最终 strategy、fallback reason 和脱敏 fingerprint。索引差异或可渲染 partial coverage 的 CLI 退出码为 0；参数、连接、拓扑、范围发现、collection gate、取消或输出失败仍返回非零。
+- expected shards 来自独立 routing metadata，并使用 `listShards` 与 `collStats.shards` 校验；工具不会从本次索引 observation 反推预期范围，也不会把整 shard 缺失误报为健康。
 - `capacity` 中 `dataSize` 是逻辑未压缩数据量，`storageSize` 是集合已分配存储且不含索引；free storage 表示存储引擎可复用空间，不代表操作系统会立即回收。
 - SDK 诊断方法可能返回 result 与 `*mot.DiagnosticPartialError`；既有 bulk `*mot.PartialError` 保持源码兼容，诊断已有有效证据也不会因单个节点或 collector 失败而丢失。
 
@@ -370,6 +375,7 @@ URI: mongodb://root:***@10.0.0.1:27017/admin
 | `overview` | 展示当前副本集所有节点状态 | 遍历每个 shard，分别展示各 shard 副本集的节点状态 |
 | `coll-stats` | 展示集合的 `documents`、`avgObjSize`、`storageSize` | 额外展示 `isSharded` 列，标识集合是否已分片 |
 | `slowlog` | 从当前副本集的 PRIMARY/SECONDARY 节点聚合 `system.profile` | 逐 shard 遍历，分别聚合各 shard 的慢日志 |
+| `index-audit` | 显式不含 `consistency` 时可运行通用检查；默认 consistency 会拒绝该拓扑 | 支持 3.4–7.x 跨 shard 一致性与通用索引检查 |
 
 ### 并发控制
 
@@ -379,6 +385,7 @@ URI: mongodb://root:***@10.0.0.1:27017/admin
 | :--- | :--- | :--- |
 | `coll-stats` / `check-shard` | 20 | 每个数据库内，集合级别的统计查询并发上限 |
 | `slowlog` | 5 | 每个节点内，数据库级别的 `system.profile` 聚合并发上限 |
+| `index-audit` | 10（可配置） | collection 级有界并发；单 collection 的 shard fallback/二次确认串行并共享 context budget |
 
 并发通过 `errgroup.SetLimit()` 控制，超出上限的任务会自动排队等待。
 

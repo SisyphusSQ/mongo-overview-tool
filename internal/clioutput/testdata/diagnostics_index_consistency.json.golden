@@ -1,0 +1,70 @@
+{
+  "collectedAt": "2026-07-16T08:00:00Z",
+  "consistencySummary": {
+    "consistent": 0,
+    "inconsistent": 1,
+    "inconclusive": 0,
+    "skipped": 0
+  },
+  "collections": [
+    {
+      "namespace": "app.orders",
+      "sharded": true,
+      "state": "inconsistent",
+      "strategy": "direct_list_indexes",
+      "expectedShards": [
+        "shard-a",
+        "shard-b"
+      ],
+      "observedShards": [
+        "shard-a"
+      ],
+      "coverage": "incomplete",
+      "fallback": {
+        "from": "index_stats",
+        "to": "direct_list_indexes",
+        "reasonCode": "incomplete_coverage"
+      },
+      "differences": [
+        {
+          "code": "index.missing_on_shard",
+          "indexName": "tenant_1",
+          "shards": [
+            "shard-b"
+          ],
+          "key": [
+            {
+              "field": "tenant",
+              "order": "1"
+            }
+          ],
+          "fingerprint": "safe-fingerprint"
+        }
+      ],
+      "indexes": [],
+      "findings": null
+    }
+  ],
+  "findings": [
+    {
+      "code": "index.missing_on_shard",
+      "severity": "warning",
+      "scope": {
+        "type": "namespace",
+        "namespace": "app.orders"
+      },
+      "summary": "索引在部分 expected shards 上缺失"
+    }
+  ],
+  "collectorStatuses": [
+    {
+      "name": "index_consistency_direct",
+      "state": "failed",
+      "scope": {
+        "type": "namespace",
+        "namespace": "app.orders"
+      },
+      "reasonCode": "incomplete_coverage"
+    }
+  ]
+}

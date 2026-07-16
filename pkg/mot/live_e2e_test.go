@@ -193,6 +193,58 @@ func TestLiveSDKReadOnlyE2E(t *testing.T) {
 	)
 }
 
+func TestLiveIndexConsistencyReadOnlyE2E(t *testing.T) {
+	// 场景：在维护者预置的分片集合上验证真实版本策略、expected shards 与只读 consistency 路径；测试本身不创建索引或数据。
+	if ClusterType(requireLiveEnv(t, "MOT_TEST_EXPECT_CLUSTER")) != ClusterSharded {
+		t.Skip("index consistency live E2E requires a sharded cluster")
+	}
+	host := requireLiveEnv(t, "MOT_TEST_MONGO_HOST")
+	username := requireLiveEnv(t, "MONGO_USER")
+	password := requireLiveEnv(t, "MONGO_PASS")
+	database := requireLiveEnv(t, "MOT_TEST_CONSISTENCY_DATABASE")
+	collection := requireLiveEnv(t, "MOT_TEST_CONSISTENCY_COLLECTION")
+	port, err := strconv.Atoi(requireLiveEnv(t, "MOT_TEST_MONGO_PORT"))
+	if err != nil || port <= 0 {
+		t.Fatalf("MOT_TEST_MONGO_PORT must be a positive integer")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), liveE2ETimeout)
+	defer cancel()
+	client, err := NewClient(ctx, Options{
+		Host: host, Port: port, Username: username, Password: password,
+		AuthSource: defaultAuthSource, ConnectTimeout: 15 * time.Second, Direct: boolPointer(false),
+	})
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+	defer func() {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), cleanupTimeout)
+		defer closeCancel()
+		if err := client.Close(closeCtx); err != nil {
+			t.Errorf("Close failed: %v", err)
+		}
+	}()
+
+	version, err := client.conn.ServerVersion(ctx)
+	if err != nil {
+		t.Fatalf("ServerVersion failed: %v", err)
+	}
+	wantStrategy, allowed := indexConsistencyStrategyForVersion(version)
+	if !allowed {
+		t.Fatalf("server version %q is outside the supported 3.4-7.x range", version)
+	}
+	result, operationErr := client.IndexAudit(ctx, IndexAuditOptions{
+		Databases: []string{database}, Collections: []string{collection},
+		Checks: []IndexAuditCheck{IndexCheckConsistency}, MaxCollections: 1, Concurrency: 1,
+	})
+	namespace := database + "." + collection
+	if err := validateLiveIndexConsistencyResult(result, operationErr, wantStrategy, namespace); err != nil {
+		t.Fatalf("live index consistency gate failed: %v", err)
+	}
+	item := result.Collections[0]
+	t.Logf("live index consistency passed: strategy=%s state=%s coverage=%s expectedShards=%d fallback=%t", item.Strategy, item.State, item.Coverage, len(item.ExpectedShards), item.Fallback != nil)
+}
+
 func requireLiveEnv(t *testing.T, key string) string {
 	t.Helper()
 	value := strings.TrimSpace(os.Getenv(key))

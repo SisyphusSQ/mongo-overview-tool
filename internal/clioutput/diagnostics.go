@@ -56,6 +56,7 @@ func PrintDiagnosticResult(w io.Writer, result any, format string) error {
 		printStatuses(w, value.CollectorStatuses)
 	case *mot.IndexAuditResult:
 		fmt.Fprintln(w, "MongoDB Index Audit")
+		printIndexConsistency(w, value)
 		fmt.Fprintln(w, "NAMESPACE\tINDEX\tSHARD\tHOST\tOPS\tSINCE\tSIZE")
 		for _, collection := range value.Collections {
 			for _, index := range collection.Indexes {
@@ -92,6 +93,52 @@ func PrintDiagnosticResult(w io.Writer, result any, format string) error {
 		return fmt.Errorf("unsupported diagnostic result %T", result)
 	}
 	return nil
+}
+
+func printIndexConsistency(w io.Writer, result *mot.IndexAuditResult) {
+	hasConsistency := false
+	for _, collection := range result.Collections {
+		if collection.State != "" {
+			hasConsistency = true
+			break
+		}
+	}
+	if !hasConsistency {
+		return
+	}
+	fmt.Fprintf(w, "Consistency Summary: consistent=%d inconsistent=%d inconclusive=%d skipped=%d\n",
+		result.ConsistencySummary.Consistent, result.ConsistencySummary.Inconsistent,
+		result.ConsistencySummary.Inconclusive, result.ConsistencySummary.Skipped)
+	fmt.Fprintln(w, "NAMESPACE\tSHARDED\tSTATE\tSTRATEGY\tCOVERAGE\tEXPECTED\tOBSERVED\tFALLBACK")
+	for _, collection := range result.Collections {
+		if collection.State == "" {
+			continue
+		}
+		fallback := "-"
+		if collection.Fallback != nil {
+			fallback = fmt.Sprintf("%s->%s(%s)", collection.Fallback.From, collection.Fallback.To, collection.Fallback.ReasonCode)
+		}
+		fmt.Fprintf(w, "%s\t%t\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			collection.Namespace, collection.Sharded, collection.State, collection.Strategy, collection.Coverage,
+			strings.Join(collection.ExpectedShards, ","), strings.Join(collection.ObservedShards, ","), fallback)
+	}
+	fmt.Fprintln(w, "Index Differences:")
+	fmt.Fprintln(w, "NAMESPACE\tCODE\tINDEX\tSHARDS\tKEY\tFINGERPRINT\tFIELDS\tSOURCE")
+	for _, collection := range result.Collections {
+		for _, difference := range collection.Differences {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				collection.Namespace, difference.Code, difference.IndexName, strings.Join(difference.Shards, ","),
+				indexKeyText(difference.Key), difference.Fingerprint, strings.Join(difference.DifferingFields, ","), difference.SourceType)
+		}
+	}
+}
+
+func indexKeyText(key []mot.IndexKeyField) string {
+	parts := make([]string, 0, len(key))
+	for _, field := range key {
+		parts = append(parts, field.Field+":"+field.Order)
+	}
+	return strings.Join(parts, ",")
 }
 
 func printFindings(w io.Writer, findings []mot.DiagnosticFinding) {
