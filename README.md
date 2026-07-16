@@ -109,11 +109,15 @@ defer func() {
 overview, err := client.Overview(ctx, mot.OverviewOptions{IncludeHosts: true})
 ```
 
-SDK 入口返回结构化 result，不返回 CLI 表格字符串；`MONGO_USER` / `MONGO_PASS` 等环境变量仍只由 CLI 层处理。更多示例见：
+SDK 入口返回结构化 result，不返回 CLI 表格字符串；SDK 核心不读取环境变量，CLI 或示例应用层负责读取后显式组装 `mot.Options`。更多示例见：
 
 - `examples/sdk/overview`
 - `examples/sdk/coll_stats`
 - `examples/sdk/bulk_delete_dry_run`
+- `examples/sdk/diagnostics`
+- `examples/sdk/index_consistency`
+
+其中 `diagnostics` 展示 `Doctor`、`CurrentOperations`、`Hotspot`、通用 `IndexAudit`、`Capacity` 和 `SlowlogSummary` 的只读 SDK 调用；`index_consistency` 展示 MongoDB 3.4–7.x 分片集合索引一致性检查。完整运行方式和环境变量见 `examples/sdk/README.md`。
 
 真实 MongoDB 集成测试需显式启用：
 

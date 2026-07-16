@@ -371,13 +371,17 @@ func (c *Conn) Top(ctx context.Context, maxTime time.Duration) (TopSnapshot, err
 
 func decodeTopSnapshot(raw bson.Raw) (TopSnapshot, error) {
 	var response struct {
-		Totals map[string]bson.M `bson:"totals"`
+		Totals bson.M `bson:"totals"`
 	}
 	if err := bson.Unmarshal(raw, &response); err != nil {
 		return TopSnapshot{}, err
 	}
 	result := TopSnapshot{Namespaces: make(map[string]TopNamespaceCounter, len(response.Totals))}
-	for namespace, metrics := range response.Totals {
+	for namespace, value := range response.Totals {
+		metrics, ok := value.(bson.M)
+		if !ok {
+			continue
+		}
 		counter := TopNamespaceCounter{}
 		for _, category := range []string{"queries", "getmore"} {
 			count, elapsed := topMetric(metrics[category])

@@ -17,9 +17,11 @@ import (
 const (
 	defaultCurrentOperationsMinDuration = 2 * time.Second
 	defaultCurrentOperationsLimit       = 100
+	currentOpAggregationMinWireVersion  = 6
 )
 
 type currentOperationsLoader func(pkgmongo.CurrentOperationsQuery) ([]pkgmongo.CurrentOperationSnapshot, string, error)
+type currentOperationsCollector func(pkgmongo.CurrentOperationsQuery) ([]pkgmongo.CurrentOperationSnapshot, error)
 
 type CurrentOperationsOptions struct {
 	MinDuration             time.Duration
@@ -90,7 +92,7 @@ func (c *Client) CurrentOperations(ctx context.Context, opts CurrentOperationsOp
 		Limit: normalized.Limit, MaxTime: normalized.MaxTime,
 	}
 	raw, source, visibility, status, collectErr := collectCurrentOperationsWithVisibility(query, func(query pkgmongo.CurrentOperationsQuery) ([]pkgmongo.CurrentOperationSnapshot, string, error) {
-		return c.collectCurrentOperations(ctx, query)
+		return c.collectCurrentOperations(ctx, query, cluster.MaxWireVersion)
 	})
 	result := &CurrentOperationsResult{
 		ClusterType: clusterType, CollectedAt: time.Now().UTC(),
@@ -167,15 +169,32 @@ func normalizeCurrentOperationsOptions(opts CurrentOperationsOptions) (CurrentOp
 	return opts, nil
 }
 
-func (c *Client) collectCurrentOperations(ctx context.Context, query pkgmongo.CurrentOperationsQuery) ([]pkgmongo.CurrentOperationSnapshot, string, error) {
-	operations, err := c.conn.CurrentOperations(ctx, query)
+func (c *Client) collectCurrentOperations(ctx context.Context, query pkgmongo.CurrentOperationsQuery, maxWireVersion int) ([]pkgmongo.CurrentOperationSnapshot, string, error) {
+	return collectCurrentOperationsForWireVersion(
+		maxWireVersion,
+		query,
+		func(query pkgmongo.CurrentOperationsQuery) ([]pkgmongo.CurrentOperationSnapshot, error) {
+			return c.conn.CurrentOperations(ctx, query)
+		},
+		func(query pkgmongo.CurrentOperationsQuery) ([]pkgmongo.CurrentOperationSnapshot, error) {
+			return c.conn.CurrentOperationsCommand(ctx, query)
+		},
+	)
+}
+
+func collectCurrentOperationsForWireVersion(maxWireVersion int, query pkgmongo.CurrentOperationsQuery, aggregationCollector, commandCollector currentOperationsCollector) ([]pkgmongo.CurrentOperationSnapshot, string, error) {
+	if maxWireVersion < currentOpAggregationMinWireVersion {
+		operations, err := commandCollector(query)
+		return operations, "command_fallback", err
+	}
+	operations, err := aggregationCollector(query)
 	if err == nil {
 		return operations, "aggregation", nil
 	}
 	if !isUnsupportedCurrentOpAggregation(err) {
 		return nil, "aggregation", err
 	}
-	operations, fallbackErr := c.conn.CurrentOperationsCommand(ctx, query)
+	operations, fallbackErr := commandCollector(query)
 	return operations, "command_fallback", fallbackErr
 }
 
@@ -183,7 +202,7 @@ func isUnsupportedCurrentOpAggregation(err error) bool {
 	var commandError drivermongo.CommandError
 	if errors.As(err, &commandError) {
 		switch commandError.Code {
-		case 9, 16436, 168, 40324:
+		case 9, 168, 16436, 17138, 40324:
 			return true
 		}
 	}
