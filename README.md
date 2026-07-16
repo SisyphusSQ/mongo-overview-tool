@@ -33,7 +33,7 @@ make test
 
 ### 源码构建
 
-确保你已安装 Go 环境（建议 Go 1.20+）。
+确保你已安装 Go 1.26+ 环境（与 `go.mod` 一致）。
 
 ```bash
 git clone https://github.com/SisyphusSQ/mongo-overview-tool.git
@@ -89,6 +89,23 @@ Expand-Archive -Path .\mot.windows.amd64.zip -DestinationPath .\mot
 ## Go SDK 用法
 
 除 CLI 外，本仓库也提供可嵌入 Go SDK：
+
+在已有 Go module 中添加依赖：
+
+```bash
+go get github.com/SisyphusSQ/mongo-overview-tool/pkg/mot@main
+go mod tidy
+```
+
+如果从空目录开始，可先创建 module；`go get` 必须在 Go module 内执行：
+
+```bash
+mkdir mot-sdk-demo && cd mot-sdk-demo
+go mod init example.com/mot-sdk-demo
+go get github.com/SisyphusSQ/mongo-overview-tool/pkg/mot@main
+```
+
+安装后可直接导入 `pkg/mot`。当前 SDK 应使用 `@main`：Go 会将解析到的提交记录为伪版本。当前 `v2.x` 标签尚未采用 Go 所需的 `/v2` 模块路径，因此不能直接用于 `go get`；在模块路径完成对应升级前，不要使用 `@v2.x` 或 `@latest`。
 
 ```go
 import "github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
@@ -243,20 +260,68 @@ mot slowlog --db mydb --hash xxxxxxxx
 
 MongoDB 3.4 等旧版本的 `system.profile` 不提供 `queryHash`。此时概览会根据 namespace、operation 和 plan summary 生成 `legacy:` 前缀的稳定标识；该标识可直接传给 `--hash` 查看这一聚合组中最新的详情记录。它是兼容标识，不等同于新版 MongoDB 的查询形状哈希。
 
-### 5. MongoDB 诊断与巡检
+### 5. 健康巡检 (`doctor`)
 
-新增诊断命令默认只读，并提供 `--format table|json` 与 `--timeout`。`unsupported`、`unauthorized`、`skipped`、`failed` 会作为 collector status 保留，不会被表格输出吞掉。
+执行只读健康检查，输出 finding 和各 collector 的执行状态。所有诊断命令都支持 `--format table|json` 与 `--timeout`；`unsupported`、`unauthorized`、`skipped`、`failed` 不会被表格输出吞掉。
+
+**常用参数：**
+- `--minimum-severity`: 最低 finding 严重级别，取值为 `info`、`warning` 或 `critical`，默认 `info`。
+- `--concurrency`: 节点 collector 最大并发数，默认 `10`。
+- `--include-system-db`: 是否纳入系统库。
+- `--oplog-window`: 显式采集 oplog window 指标。
 
 ```bash
 # 健康巡检；oplog window 需要显式启用
 mot doctor --uri '<mongodb-uri>' --oplog-window --format json
 
+```
+
+### 6. 活跃操作 (`ops`)
+
+查看活跃操作，过滤条件在服务端生效。输出会脱敏，不展示 command、filter、user 或 session 内容。
+
+**常用参数：**
+- `--min-duration`: 最短运行时长，默认 `2s`。
+- `--database`、`--namespace`: 以逗号分隔的数据库或 namespace 过滤条件。
+- `--limit`: 最大结果数，默认 `100`。
+- `--all-users`: 请求所有用户的操作；无权限时退回当前用户，默认 `true`。
+- `--include-idle-transactions`、`--include-idle-cursors`: 显式纳入空闲事务或 cursor。
+
+```bash
 # 服务端过滤并脱敏活跃操作；不输出 command/filter/user/session
 mot ops --uri '<mongodb-uri>' --min-duration 2s --limit 100
 
+```
+
+### 7. 热点分析 (`hotspot`)
+
+连续采集两次快照，按实际采样间隔计算节点和 namespace 的访问速率，用于定位短周期热点。
+
+**常用参数：**
+- `--duration`: 两次快照之间的间隔，默认 `10s`。
+- `--top`: 最多输出的 namespace 热点数，默认 `10`。
+- `--database`: 以逗号分隔的数据库过滤条件。
+- `--concurrency`: 节点 collector 最大并发数，默认 `10`。
+- `--include-system-db`: 是否纳入系统库。
+
+```bash
 # 默认使用 10 秒双快照，按实际间隔计算 namespace rate
 mot hotspot --uri '<mongodb-uri>' --database app --top 10
 
+```
+
+### 8. 索引审计 (`index-audit`)
+
+审计索引使用情况、冗余定义、空间占用、构建状态和分片集合索引一致性。必须且只能指定 `--database` 或 `--all-databases` 之一。
+
+**常用参数：**
+- `--database`、`--all-databases`: 审计范围，二者互斥。
+- `--collection`: 以逗号分隔的集合过滤条件。
+- `--checks`: 指定检查项：`unused`、`redundant`、`space`、`building`、`consistency`。
+- `--min-observation`: 零使用索引的最小观测窗口，默认 `7d`。
+- `--max-collections`、`--concurrency`: 集合数上限及 collection collector 最大并发数。
+
+```bash
 # database 与 all-databases 二选一；默认 checks 包含 consistency
 mot index-audit --uri '<mongodb-uri>' --database app --format table
 
@@ -264,6 +329,23 @@ mot index-audit --uri '<mongodb-uri>' --database app --format table
 mot index-audit --uri '<mongodb-uri>' --database app \
   --checks consistency --collection orders --format json
 
+```
+
+collection 结果分别给出 `consistent`、`inconsistent`、`inconclusive` 或 `skipped`，同时保留 expected/observed shards、coverage、最终 strategy、fallback reason 和脱敏 fingerprint。索引差异或可渲染 partial coverage 的 CLI 退出码为 0；参数、连接、拓扑、范围发现、collection gate、取消或输出失败仍返回非零。
+
+expected shards 来自独立 routing metadata，并使用 `listShards` 与 `collStats.shards` 校验；工具不会从本次索引 observation 反推预期范围，也不会把整 shard 缺失误报为健康。
+
+### 9. 容量快照与离线差异 (`capacity`)
+
+采集脱敏、稳定的容量快照；默认不采集 free storage，避免引入高成本操作。`capacity diff` 仅比较两个本地快照，不连接 MongoDB。
+
+**常用参数：**
+- `--database`、`--collection`: 以逗号分隔的范围过滤；未指定数据库时选择所有非系统库。
+- `--free-storage`: 显式启用高成本的 free storage 采集。
+- `--snapshot`: 将脱敏 JSON 快照写入本地路径。
+- `--max-collections`、`--concurrency`: 集合数上限及 collection collector 最大并发数。
+
+```bash
 # free storage 是显式高成本 opt-in；snapshot 只包含脱敏结构化结果
 mot capacity --uri '<mongodb-uri>' --database app \
   --free-storage --snapshot ./capacity-after.json
@@ -272,15 +354,12 @@ mot capacity --uri '<mongodb-uri>' --database app \
 mot capacity diff ./capacity-before.json ./capacity-after.json
 ```
 
-说明：
+#### 容量与 SDK 补充说明
 
-- `index-audit consistency` 只支持通过 `mongos` 检查 MongoDB 3.4–7.x 分片集群；3.4–4.2.3 使用 shard 直连 `listIndexes`，4.2.4–6.x 优先 `$indexStats`，7.x 优先 `checkMetadataConsistency(checkIndexes=true)`，证据不完整时按状态和 context 安全降级。
-- collection 结果分别给出 `consistent`、`inconsistent`、`inconclusive` 或 `skipped`，同时保留 expected/observed shards、coverage、最终 strategy、fallback reason 和脱敏 fingerprint。索引差异或可渲染 partial coverage 的 CLI 退出码为 0；参数、连接、拓扑、范围发现、collection gate、取消或输出失败仍返回非零。
-- expected shards 来自独立 routing metadata，并使用 `listShards` 与 `collStats.shards` 校验；工具不会从本次索引 observation 反推预期范围，也不会把整 shard 缺失误报为健康。
 - `capacity` 中 `dataSize` 是逻辑未压缩数据量，`storageSize` 是集合已分配存储且不含索引；free storage 表示存储引擎可复用空间，不代表操作系统会立即回收。
 - SDK 诊断方法可能返回 result 与 `*mot.DiagnosticPartialError`；既有 bulk `*mot.PartialError` 保持源码兼容，诊断已有有效证据也不会因单个节点或 collector 失败而丢失。
 
-### 6. 批量删除 (`bulk-delete`)
+### 10. 批量删除 (`bulk-delete`)
 
 分批次删除数据，支持流控（暂停时间），避免一次性删除大量数据导致数据库负载过高。
 
@@ -314,7 +393,7 @@ mot bulk-delete -t 10.0.0.1 -P 27017 \
   -b 500 --pause-ms 200
 ```
 
-### 7. 批量更新 (`bulk-update`)
+### 11. 批量更新 (`bulk-update`)
 
 分批次更新数据，同样支持流控。
 
