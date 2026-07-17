@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot"
 )
 
 func TestLegacyPartialErrorUnkeyedLiteralCompatibility(t *testing.T) {

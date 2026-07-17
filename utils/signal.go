@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
+	l "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/log"
 )
 
 // SetupSignalHandler 注册 SIGINT/SIGTERM 信号监听，返回取消标志和清理函数。

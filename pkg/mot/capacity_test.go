@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
+	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mongo"
 )
 
 func TestDiffCapacityPreservesUnavailableAndCollectionLifecycle(t *testing.T) {

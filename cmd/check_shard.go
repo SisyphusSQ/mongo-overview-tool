@@ -8,12 +8,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/SisyphusSQ/mongo-overview-tool/internal/clioutput"
-	"github.com/SisyphusSQ/mongo-overview-tool/internal/config"
-	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
-	"github.com/SisyphusSQ/mongo-overview-tool/utils"
-	"github.com/SisyphusSQ/mongo-overview-tool/vars"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/internal/clioutput"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/internal/config"
+	l "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/log"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/utils"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/vars"
 )
 
 var shCfg config.StatsConfig

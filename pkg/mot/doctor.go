@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
+	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mongo"
 )
 
 const (

@@ -81,7 +81,7 @@
 
 ## 项目级工程约束
 
-- 本项目是 Go CLI 工具，模块路径固定为 `github.com/SisyphusSQ/mongo-overview-tool`。
+- 本项目是 Go CLI 工具，模块路径固定为 `github.com/SisyphusSQ/mongo-overview-tool/v2`。
 - `go.mod` 当前声明 `go 1.26`，初始化 harness 时不得顺手调整 Go module 版本。
 - MongoDB 官方 Go SDK 固定为 `go.mongodb.org/mongo-driver v1.10.6`；除非维护者明确要求，不升级或降级该依赖。
 - Go 代码新增或修改 import 时按三段式组织：标准库、外部依赖、项目内部包；空分组直接省略。

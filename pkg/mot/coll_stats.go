@@ -10,7 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"golang.org/x/sync/errgroup"
 
-	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
+	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mongo"
 )
 
 const defaultCollectionStatsConcurrency = 20

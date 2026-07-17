@@ -74,6 +74,44 @@ class ProjectVersionReleaseTest(unittest.TestCase):
         self.assertIn("新增 SDK", text)
         self.assertIn("## v1.1.0(20260214)", text)
 
+    def test_changelog_add_stays_above_level_three_release_history(
+        self,
+    ) -> None:
+        release = load_module()
+        self.write_changelog(
+            "## Unreleased\n"
+            "<!-- 普通 issue 新增条目只写在本 Unreleased 段；"
+            "不要写入下面已归档版本段。 -->\n\n"
+            "### v2.1.0(20260716)\n"
+            "#### feature:\n"
+            "1. 历史功能\n"
+        )
+
+        release.changelog_add(
+            self.repo,
+            issue="",
+            category="bugFix",
+            text="修复 module path",
+            write=True,
+        )
+        release.release_archive(
+            self.repo,
+            version="v2.2.0",
+            date_value="20260717",
+            write=True,
+        )
+        text = (self.repo / "changeLog.md").read_text(encoding="utf-8")
+        new_release = text.split("### v2.2.0", 1)[1].split(
+            "### v2.1.0",
+            1,
+        )[0]
+        old_release = text.split("### v2.1.0", 1)[1]
+
+        self.assertIn("修复 module path", new_release)
+        self.assertNotIn("历史功能", new_release)
+        self.assertNotIn("修复 module path", old_release)
+        self.assertIn("历史功能", old_release)
+
     def test_help_runs(self) -> None:
         completed = subprocess.run(
             ["python3", str(SCRIPT), "--help"],

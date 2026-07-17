@@ -90,25 +90,44 @@ Expand-Archive -Path .\mot.windows.amd64.zip -DestinationPath .\mot
 
 除 CLI 外，本仓库也提供可嵌入 Go SDK：
 
-在已有 Go module 中添加依赖：
+在已有 Go module 中，先在代码中导入下方的 `pkg/mot`，再添加依赖并整理 module：
 
 ```bash
-go get github.com/SisyphusSQ/mongo-overview-tool/pkg/mot@main
+go get github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot@v2.2.0
 go mod tidy
 ```
 
-如果从空目录开始，可先创建 module；`go get` 必须在 Go module 内执行：
+如果从空目录开始，可先创建 module：
 
 ```bash
 mkdir mot-sdk-demo && cd mot-sdk-demo
 go mod init example.com/mot-sdk-demo
-go get github.com/SisyphusSQ/mongo-overview-tool/pkg/mot@main
 ```
 
-安装后可直接导入 `pkg/mot`。当前 SDK 应使用 `@main`：Go 会将解析到的提交记录为伪版本。当前 `v2.x` 标签尚未采用 Go 所需的 `/v2` 模块路径，因此不能直接用于 `go get`；在模块路径完成对应升级前，不要使用 `@v2.x` 或 `@latest`。
+创建一个实际导入 SDK 的 `main.go`：
 
 ```go
-import "github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
+package main
+
+import "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot"
+
+func main() {
+    _ = mot.Options{}
+}
+```
+
+再添加依赖、整理 module 并运行：
+
+```bash
+go get github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot@v2.2.0
+go mod tidy
+go run .
+```
+
+`v2.2.0` 是首个采用 `/v2` module path、可供 Go module 稳定引用的 SDK 版本。v1 module 已冻结；`v2.0.0`、`v2.1.0` 仍保留为历史 CLI 二进制 Release，但不能作为 Go v2 module 依赖。升级旧的 `@main` 伪版本时，需要显式修改 import path。
+
+```go
+import "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot"
 
 ctx := context.Background()
 client, err := mot.NewClient(ctx, mot.Options{

@@ -7,8 +7,8 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 
-	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
-	"github.com/SisyphusSQ/mongo-overview-tool/utils/retry"
+	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mongo"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/utils/retry"
 )
 
 const (

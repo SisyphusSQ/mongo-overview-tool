@@ -1,6 +1,13 @@
 ## Unreleased
 <!-- 普通 issue 新增条目只写在本 Unreleased 段；不要写入下面已归档版本段。 -->
 
+### v2.2.0(20260717)
+#### optimization:
+1. 统一项目内 Go import、Makefile 版本注入、SDK 示例和设计文档，并新增 module contract project-check 防止路径回退。
+#### bugFix:
+1. 修复 v2.x tag 与 go.mod major module path 不匹配的问题，将 Go SDK 正式迁移到 /v2 module path，使外部项目可以按稳定版本直接 go get。
+#### note:
+1. v1 module 自本版本起冻结；v2.0.0、v2.1.0 保留为历史 CLI 二进制 Release，v2.2.0 是首个可作为 Go v2 module 稳定引用的版本。
 ### v2.1.0(20260716)
 #### feature:
 1. 新增 `doctor`、`ops`、`hotspot`、`index-audit` 和 `capacity` 只读诊断命令及对应 Go SDK，支持结构化 finding、collector status、部分结果、脱敏 table/JSON、容量快照与纯离线 diff。

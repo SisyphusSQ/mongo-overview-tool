@@ -3,7 +3,7 @@ package cmd
 import (
 	"testing"
 
-	"github.com/SisyphusSQ/mongo-overview-tool/internal/config"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/internal/config"
 )
 
 // TestValidateBulkConfig 校验批量命令参数边界。

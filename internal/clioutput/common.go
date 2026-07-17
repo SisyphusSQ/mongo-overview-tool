@@ -7,8 +7,8 @@ import (
 
 	"github.com/fatih/color"
 
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
-	"github.com/SisyphusSQ/mongo-overview-tool/utils"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/utils"
 )
 
 func PrintAhead(w io.Writer, uri string) {

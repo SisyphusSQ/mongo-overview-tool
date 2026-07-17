@@ -1,4 +1,4 @@
-module github.com/SisyphusSQ/mongo-overview-tool
+module github.com/SisyphusSQ/mongo-overview-tool/v2
 
 go 1.26
 

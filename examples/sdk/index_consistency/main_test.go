@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot"
 )
 
 type fakeIndexAuditClient struct {

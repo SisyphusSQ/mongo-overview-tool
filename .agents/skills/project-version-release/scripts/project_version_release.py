@@ -33,6 +33,10 @@ VERSION_FILE_HINTS = [
 UNRELEASED_GUIDANCE_COMMENTS = {
     "<!-- 普通 issue 新增条目只写在本 Unreleased 段；不要写入下面已归档版本段。 -->",
 }
+RELEASE_SECTION_RE = re.compile(
+    r"(?m)^(?:##[ \t]+|"
+    r"###[ \t]+v?\d+\.\d+\.\d+(?:-[^\s(]+)?)"
+)
 
 
 @dataclass
@@ -165,7 +169,7 @@ def find_unreleased_bounds(text: str) -> tuple[int, int, int, int] | None:
     match = re.search(r"(?m)^##[ \t]+Unreleased[ \t]*$", text)
     if not match:
         return None
-    next_heading = re.search(r"(?m)^##?\s+", text[match.end() :])
+    next_heading = RELEASE_SECTION_RE.search(text[match.end() :])
     end = len(text) if not next_heading else match.end() + next_heading.start()
     return match.start(), match.end(), match.end(), end
 

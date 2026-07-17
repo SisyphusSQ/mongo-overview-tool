@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/SisyphusSQ/mongo-overview-tool/internal/config"
-	"github.com/SisyphusSQ/mongo-overview-tool/vars"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/internal/config"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/vars"
 )
 
 var rootCmd = &cobra.Command{

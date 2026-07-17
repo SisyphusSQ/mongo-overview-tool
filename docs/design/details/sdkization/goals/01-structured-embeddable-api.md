@@ -28,7 +28,7 @@ pkg/mot
 导入路径：
 
 ```go
-import "github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
+import "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot"
 ```
 
 选择 `mot` 的理由：
@@ -136,7 +136,7 @@ var (
 
 ## 验收标准
 
-- 外部包可以成功 import `github.com/SisyphusSQ/mongo-overview-tool/pkg/mot`。
+- 外部包可以成功 import `github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot`。
 - `pkg/mot` 不 import `cmd`、`internal/config`、`internal/service`。
 - 公开方法返回结构化 result，不以终端输出作为结果载体。
 - 所有公开方法都有 options、result、错误语义单测。

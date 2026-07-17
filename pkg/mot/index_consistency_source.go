@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
+	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mongo"
 )
 
 const indexConsistencyCollectorTimeout = 5 * time.Second

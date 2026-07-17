@@ -158,7 +158,7 @@ fmt
 os
 os/signal
 github.com/fatih/color
-github.com/SisyphusSQ/mongo-overview-tool/pkg/progress
+github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/progress
 ```
 
 注意：`fmt` 可能用于 `fmt.Errorf`。如果要机械检查，需要区分 `fmt.Errorf` 和 `fmt.Print*`，第一轮可以先用 review gate，不急着脚本化。

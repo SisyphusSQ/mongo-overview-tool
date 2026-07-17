@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/log"
 )
 
 const (

@@ -165,7 +165,7 @@ pkg/mongo/
 `pkg/mot` 是推荐的公开 SDK 包名。它比 `pkg/sdk` 更贴近模块语义，也避免导入路径出现宽泛的 `sdk`：
 
 ```go
-import "github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
+import "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot"
 ```
 
 ## 公开 Client 设计
@@ -703,7 +703,7 @@ make test
 
 验收：
 
-- 外部包可以 import `github.com/SisyphusSQ/mongo-overview-tool/pkg/mot`。
+- 外部包可以 import `github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot`。
 - `pkg/mot` 不 import `cmd`、`internal/config`、`internal/service`。
 - `pkg/mot` 不直接打印 stdout。
 
@@ -802,21 +802,15 @@ internal/service/*
 当前模块路径固定为：
 
 ```text
-github.com/SisyphusSQ/mongo-overview-tool
+github.com/SisyphusSQ/mongo-overview-tool/v2
 ```
 
-SDK 初期建议不承诺 Go module v1 级别的长期 API 稳定。可以在 README 中声明：
+`v2.2.0` 是首个采用该 module path 的稳定 SDK 版本。兼容策略固定为：
 
-- CLI 行为优先兼容。
-- `pkg/mot` 在 SDK 化完成前可能调整。
-- 达到稳定 contract 后再开始按 SemVer 维护公开 API。
-
-若后续要发布 v1 SDK，需要补充：
-
-- API freeze 清单。
-- 公开类型兼容策略。
-- Deprecated 流程。
-- 示例编译检查。
+- v1 module 冻结，保留已有 tag 和已固定依赖的可复现性，不再回移功能或补发 v1 SDK。
+- `v2.0.0`、`v2.1.0` 保留为历史 CLI 二进制 Release，不移动或重建 tag，也不作为 Go v2 module 版本。
+- v2 公开 API 按 SemVer 演进；兼容变更进入 minor/patch，不兼容变更需要新的 major module path。
+- CLI 行为继续保持兼容，SDK 示例和外部 consumer 编译纳入发布验证。
 
 ## 风险与对抗式审查
 
