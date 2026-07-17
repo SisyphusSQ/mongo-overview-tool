@@ -145,6 +145,28 @@ defer func() {
 overview, err := client.Overview(ctx, mot.OverviewOptions{IncludeHosts: true})
 ```
 
+一次只调用一个只读能力时，直接使用 `Client` 即可。一次上层请求需要调用多个只读能力时，应创建一个请求级 `CollectorSession`，让这些能力共享拓扑发现、目录清单和派生成员连接：
+
+```go
+session, err := client.NewCollectorSession(mot.CollectorSessionOptions{
+    MaxConcurrency: 4,
+})
+if err != nil {
+    return err
+}
+defer func() {
+    closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    _ = session.Close(closeCtx)
+}()
+
+overview, overviewErr := session.Overview(ctx, mot.OverviewOptions{NodeConcurrency: 2})
+doctor, doctorErr := session.Doctor(ctx, mot.DoctorOptions{NodeConcurrency: 2})
+stats := session.Stats()
+```
+
+一个 session 只服务一次上层请求，可以被该请求内的多个 capability 并发使用，但调用方必须等待它们全部结束后再 `Close`。session 不跨请求、定时任务轮次或租户复用；关闭 session 后再关闭基础 `Client`。`BulkDelete` 和 `BulkUpdate` 继续直接使用 `Client`。CLI 每次只执行一个命令并退出，因此不需要自行管理 session，现有 `Client` 方法会使用兼容包装保持原行为。
+
 SDK 入口返回结构化 result，不返回 CLI 表格字符串；SDK 核心不读取环境变量，CLI 或示例应用层负责读取后显式组装 `mot.Options`。更多示例见：
 
 - `examples/sdk/overview`
@@ -153,7 +175,7 @@ SDK 入口返回结构化 result，不返回 CLI 表格字符串；SDK 核心不
 - `examples/sdk/diagnostics`
 - `examples/sdk/index_consistency`
 
-其中 `diagnostics` 展示 `Doctor`、`CurrentOperations`、`Hotspot`、通用 `IndexAudit`、`Capacity` 和 `SlowlogSummary` 的只读 SDK 调用；`index_consistency` 展示 MongoDB 3.4–7.x 分片集合索引一致性检查。完整运行方式和环境变量见 `examples/sdk/README.md`。
+其中 `diagnostics` 展示在一次 `CollectorSession` 中依次调用全部只读能力，并输出不含连接信息的 session 统计摘要；`index_consistency` 展示 MongoDB 3.4–7.x 分片集合索引一致性检查。完整运行方式和环境变量见 `examples/sdk/README.md`。
 
 真实 MongoDB 集成测试需显式启用：
 
@@ -169,10 +191,10 @@ MOT_TEST_MONGO_HOST='<host>' \
 MOT_TEST_MONGO_PORT='<port>' \
 MOT_TEST_EXPECT_CLUSTER='repl|sharding' \
 go test -tags=integration -count=1 -v \
-  -run '^TestLiveSDKReadOnlyE2E$' ./pkg/mot
+  -run '^TestLiveSDKReadOnlyE2E(Legacy|Session)$' ./pkg/mot
 ```
 
-该 live E2E 还覆盖 `Doctor`、`CurrentOperations`、`Hotspot`、通用 `IndexAudit`、`Capacity` 和增强后的 slowlog insight。分片集合索引一致性使用独立的 `TestLiveIndexConsistencyReadOnlyE2E` 和预置 namespace 环境变量。测试会读取真实 routing metadata、shard 索引定义和诊断统计，但不会创建数据、修改 Profiler、变更索引或执行维护命令。
+`Legacy` 和 `Session` 使用相同 scope、权限和 capability 参数；做性能验收时应按 Legacy → Session → Session → Legacy → Legacy → Session 的顺序分别运行并比较三次中位数。该 live E2E 还覆盖 `Doctor`、`CurrentOperations`、`Hotspot`、通用 `IndexAudit`、`Capacity` 和增强后的 slowlog insight。分片集合索引一致性使用独立的 `TestLiveIndexConsistencyReadOnlyE2E` 和预置 namespace 环境变量。测试会读取真实 routing metadata、shard 索引定义和诊断统计，但不会创建数据、修改 Profiler、变更索引或执行维护命令。
 
 ### 1. 命令行参数（推荐）
 

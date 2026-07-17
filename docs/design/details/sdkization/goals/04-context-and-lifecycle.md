@@ -121,6 +121,35 @@ func (c *Client) Close(ctx context.Context) error
 - 非空 ctx 原样传给 driver；nil ctx 仅作为防御性输入归一化为 `context.Background()`。
 - 业务查询不得脱离调用方 ctx；只有失败连接、派生成员连接和 cursor 的资源释放可以使用 `context.WithoutCancel(ctx)` 派生的有界 cleanup context，避免业务取消后跳过清理。
 
+## 请求级 CollectorSession
+
+当一个上层请求需要调用多个只读能力时，调用方应在长期 `Client` 上创建一次请求级 session：
+
+```go
+session, err := client.NewCollectorSession(mot.CollectorSessionOptions{MaxConcurrency: 4})
+if err != nil {
+    return err
+}
+defer func() {
+    closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    _ = session.Close(closeCtx)
+}()
+```
+
+生命周期规则：
+
+- session 只服务一次 HTTP/RPC 请求、任务执行或定时轮次，不跨请求、租户或轮次复用。
+- session 不保存业务 ctx；每次 `Overview`、`Doctor` 等方法继续显式接收调用方 ctx。
+- 同一请求可以并发调用多个 capability；调用方必须等待全部调用结束后再关闭 session。
+- `Close` 幂等，只关闭 session 创建的派生成员连接，不关闭基础 `Client`；正确顺序是先关闭 session，再关闭基础 Client。
+- `Close` 后 capability 返回 `ErrCollectorSessionClosed`，统计快照仍可读取。
+- `BulkDelete` / `BulkUpdate` 不进入 session。单能力调用和 CLI 继续直接使用 `Client`。
+
+session 只缓存拓扑、shard 清单、数据库/集合目录、replica-set 成员清单和派生连接。`serverStatus`、`currentOp`、`top`、容量、索引使用量及 Hotspot 前后采样等动态数据每次都重新读取，避免请求级复用改变诊断时效性。
+
+显式 session 默认全局远程并发为 4；每个 capability 自身的 `Concurrency` / `NodeConcurrency` 仍然生效，实际并发取两者较小值。旧 `Client` 方法内部使用临时兼容 session，不额外收紧原有 capability 并发参数。
+
 ## 批量操作取消
 
 Bulk 操作需要在以下点检查 ctx：

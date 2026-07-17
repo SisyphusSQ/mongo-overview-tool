@@ -26,14 +26,17 @@ go run ./examples/sdk/diagnostics
 
 该示例依次调用：
 
+- `Overview`
+- `CollectionStats`
 - `Doctor`
 - `CurrentOperations`
 - `Hotspot`
 - 通用 `IndexAudit`，显式排除分片一致性检查
 - `Capacity`
 - `SlowlogSummary`
+- 当 Summary 存在候选项时调用 `SlowlogDetail`
 
-输出是从 SDK 结构化结果提取的脱敏 JSON 摘要。遇到 `mot.ErrPartialResult` 时保留已获得的数据，并在 `partialCollectors` 中标出对应 collector。
+示例只创建一个请求级 `CollectorSession`，所有能力共享拓扑、目录和成员连接，最后输出从 SDK 结构化结果提取的脱敏 JSON 摘要及 session 统计。统计不包含 URI、用户名、密码或原始诊断文档。遇到 `mot.ErrPartialResult` 时保留已获得的数据，并在 `partialCollectors` 中标出对应 collector。
 
 ## 分片索引一致性
 
@@ -48,4 +51,4 @@ go run ./examples/sdk/index_consistency
 - 两个示例都只执行读取和诊断，不创建或修改数据、索引、Profiler、服务器参数或 routing metadata。
 - 示例不会调用 `BulkDelete`、`BulkUpdate` 或任何维护动作。
 - `MOT_EXAMPLE_DATABASE` 和 `MOT_EXAMPLE_COLLECTION` 必须显式设置，防止无边界扫描。
-- `diagnostics` 的 `IndexAudit` 和 `Capacity` 均限制为一个 collection、并发度 1；`Hotspot` 使用 100ms 采样窗口。
+- `diagnostics` 的 session 全局远程并发上限为 4；`IndexAudit` 和 `Capacity` 均限制为一个 collection、能力并发度 1；`Hotspot` 使用 100ms 采样窗口。
