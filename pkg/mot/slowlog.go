@@ -19,9 +19,23 @@ import (
 const defaultSlowlogConcurrency = 5
 
 type slowlogDatabaseLoader func(ctx context.Context, addr, db string, sort SlowlogSort) (DatabaseSlowlogSummary, bool, error)
+type slowlogHostLoader func(ctx context.Context, member pkgmongo.RsMember) (HostSlowlogSummary, []CollectorStatus, []error)
+type slowlogShardLoader func(ctx context.Context, shard pkgmongo.Shard) slowlogShardCollection
+
+type slowlogShardCollection struct {
+	replicaSet ReplicaSetSlowlogSummary
+	statuses   []CollectorStatus
+	errors     []error
+	include    bool
+}
 
 // SlowlogSummary 返回慢日志聚合结果。
 func (c *Client) SlowlogSummary(ctx context.Context, opts SlowlogOptions) (result *SlowlogSummaryResult, err error) {
+	if c != nil && c.session == nil {
+		return withEphemeralCollectorSession(ctx, c, func(session *CollectorSession) (*SlowlogSummaryResult, error) {
+			return session.SlowlogSummary(ctx, opts)
+		})
+	}
 	defer func() {
 		err = mapContextError(err)
 	}()
@@ -34,8 +48,13 @@ func (c *Client) SlowlogSummary(ctx context.Context, opts SlowlogOptions) (resul
 	if !isValidSlowlogSort(opts.Sort) {
 		return nil, invalidOptions("invalid slowlog sort %q", opts.Sort)
 	}
+	capabilityConcurrency := opts.Concurrency
+	if capabilityConcurrency <= 0 {
+		capabilityConcurrency = defaultSlowlogConcurrency
+	}
+	capabilityLimit := semaphore.NewWeighted(int64(capabilityConcurrency))
 
-	cluster, err := pkgmongo.DetectCluster(ctx, c.conn)
+	cluster, err := c.detectCluster(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -47,43 +66,62 @@ func (c *Client) SlowlogSummary(ctx context.Context, opts SlowlogOptions) (resul
 	var collectorErrors []error
 	switch cluster.Type {
 	case pkgmongo.ClusterRepl:
-		rs, statuses, collectErrors := c.replicaSetSlowlogSummary(ctx, c.conn, opts)
+		rs, statuses, collectErrors := c.replicaSetSlowlogSummary(ctx, c.conn, "base", opts, capabilityLimit)
 		result.ReplicaSets = append(result.ReplicaSets, rs)
 		result.CollectorStatuses = append(result.CollectorStatuses, statuses...)
 		collectorErrors = append(collectorErrors, collectErrors...)
 	case pkgmongo.ClusterShard:
-		shards, err := c.conn.ListShards(ctx)
+		shards, err := c.listShards(ctx)
 		if err != nil {
 			return nil, err
+		}
+		loadShard := func(ctx context.Context, shard pkgmongo.Shard) slowlogShardCollection {
+			if cancelErr := contextError(ctx); cancelErr != nil {
+				return slowlogShardCollection{errors: []error{cancelErr}}
+			}
+			replicaSet, addresses, parseErr := parseShardHost(shard.Host)
+			if parseErr != nil {
+				return slowlogShardCollection{
+					statuses: []CollectorStatus{failedCollectorStatus("slowlog_insight", FindingScope{Type: ScopeReplicaSet, Shard: shard.Id}, parseErr)},
+					errors:   []error{parseErr},
+				}
+			}
+			conn, connectErr := c.connectAddress(ctx, addresses, derivedConnectionOptions{
+				ReplicaSet: replicaSet,
+				Direct:     boolPointer(false),
+			})
+			if connectErr != nil {
+				return slowlogShardCollection{
+					statuses: []CollectorStatus{failedCollectorStatus("slowlog_insight", FindingScope{Type: ScopeReplicaSet, Shard: shard.Id, ReplicaSet: replicaSet}, connectErr)},
+					errors:   []error{connectErr},
+				}
+			}
+			defer c.closeDerivedConnection(ctx, conn)
+			rs, statuses, collectErrors := c.replicaSetSlowlogSummary(ctx, conn, replicaSet, opts, capabilityLimit)
+			if rs.Name == "" {
+				rs.Name = shard.Id
+			}
+			return slowlogShardCollection{replicaSet: rs, statuses: statuses, errors: collectErrors, include: true}
+		}
+		merge := func(item slowlogShardCollection) {
+			if item.include {
+				result.ReplicaSets = append(result.ReplicaSets, item.replicaSet)
+			}
+			result.CollectorStatuses = append(result.CollectorStatuses, item.statuses...)
+			collectorErrors = append(collectorErrors, item.errors...)
+		}
+		if c.session != nil && !c.session.legacy {
+			for _, item := range collectSlowlogShards(ctx, shards.Shards, c.session.maxConcurrency, loadShard) {
+				merge(item)
+			}
+			break
 		}
 		for _, shard := range shards.Shards {
 			if contextError(ctx) != nil {
 				collectorErrors = append(collectorErrors, contextError(ctx))
 				break
 			}
-			replicaSet, addresses, err := parseShardHost(shard.Host)
-			if err != nil {
-				collectorErrors = append(collectorErrors, err)
-				result.CollectorStatuses = append(result.CollectorStatuses, failedCollectorStatus("slowlog_insight", FindingScope{Type: ScopeReplicaSet, Shard: shard.Id}, err))
-				continue
-			}
-			conn, err := c.connectAddress(ctx, addresses, derivedConnectionOptions{
-				ReplicaSet: replicaSet,
-				Direct:     boolPointer(false),
-			})
-			if err != nil {
-				collectorErrors = append(collectorErrors, err)
-				result.CollectorStatuses = append(result.CollectorStatuses, failedCollectorStatus("slowlog_insight", FindingScope{Type: ScopeReplicaSet, Shard: shard.Id, ReplicaSet: replicaSet}, err))
-				continue
-			}
-			rs, statuses, collectErrors := c.replicaSetSlowlogSummary(ctx, conn, opts)
-			c.closeDerivedConnection(ctx, conn)
-			if rs.Name == "" {
-				rs.Name = shard.Id
-			}
-			result.ReplicaSets = append(result.ReplicaSets, rs)
-			result.CollectorStatuses = append(result.CollectorStatuses, statuses...)
-			collectorErrors = append(collectorErrors, collectErrors...)
+			merge(loadShard(ctx, shard))
 		}
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedTopology, cluster.Type)
@@ -106,8 +144,35 @@ func (c *Client) SlowlogSummary(ctx context.Context, opts SlowlogOptions) (resul
 	return result, nil
 }
 
+func collectSlowlogShards(ctx context.Context, shards []pkgmongo.Shard, concurrency int, load slowlogShardLoader) []slowlogShardCollection {
+	if load == nil {
+		return []slowlogShardCollection{{errors: []error{invalidOptions("slowlog shard loader is required")}}}
+	}
+	if concurrency <= 0 {
+		concurrency = defaultCollectorSessionConcurrency
+	}
+
+	result := make([]slowlogShardCollection, len(shards))
+	group := new(errgroup.Group)
+	group.SetLimit(concurrency)
+	for i := range shards {
+		i := i
+		group.Go(func() error {
+			result[i] = load(ctx, shards[i])
+			return nil
+		})
+	}
+	_ = group.Wait()
+	return result
+}
+
 // SlowlogDetail 返回单个 queryHash 的原始慢日志文档和索引信息。
 func (c *Client) SlowlogDetail(ctx context.Context, db, queryHash string) (result *SlowlogDetailResult, err error) {
+	if c != nil && c.session == nil {
+		return withEphemeralCollectorSession(ctx, c, func(session *CollectorSession) (*SlowlogDetailResult, error) {
+			return session.SlowlogDetail(ctx, db, queryHash)
+		})
+	}
 	defer func() {
 		err = mapContextError(err)
 	}()
@@ -203,8 +268,8 @@ func slowlogDetailFromConnection(ctx context.Context, conn *pkgmongo.Conn, db, q
 	}, nil
 }
 
-func (c *Client) replicaSetSlowlogSummary(ctx context.Context, conn *pkgmongo.Conn, opts SlowlogOptions) (ReplicaSetSlowlogSummary, []CollectorStatus, []error) {
-	rsStatus, err := conn.RsStatus(ctx)
+func (c *Client) replicaSetSlowlogSummary(ctx context.Context, conn *pkgmongo.Conn, inventoryKey string, opts SlowlogOptions, capabilityLimit *semaphore.Weighted) (ReplicaSetSlowlogSummary, []CollectorStatus, []error) {
+	inventory, err := c.replicaSetInventory(ctx, conn, inventoryKey)
 	if err != nil {
 		scope := FindingScope{Type: ScopeReplicaSet}
 		status := failedCollectorStatus("slowlog_insight", scope, err)
@@ -213,10 +278,10 @@ func (c *Client) replicaSetSlowlogSummary(ctx context.Context, conn *pkgmongo.Co
 		}
 		return ReplicaSetSlowlogSummary{}, []CollectorStatus{status}, []error{err}
 	}
-	result := ReplicaSetSlowlogSummary{Name: rsStatus.Set}
-	dbs, err := conn.Client.ListDatabaseNames(ctx, bson.M{})
+	result := ReplicaSetSlowlogSummary{Name: inventory.Name}
+	dbs, err := c.replicaSetDatabaseNames(ctx, conn, inventoryKey)
 	if err != nil {
-		scope := FindingScope{Type: ScopeReplicaSet, ReplicaSet: rsStatus.Set}
+		scope := FindingScope{Type: ScopeReplicaSet, ReplicaSet: inventory.Name}
 		status := failedCollectorStatus("slowlog_insight", scope, err)
 		if isUnauthorizedError(err) {
 			return result, []CollectorStatus{status}, nil
@@ -233,12 +298,14 @@ func (c *Client) replicaSetSlowlogSummary(ctx context.Context, conn *pkgmongo.Co
 		}
 		filteredDBs = append(filteredDBs, db)
 	}
-	var statuses []CollectorStatus
-	var collectorErrors []error
-	for _, member := range rsStatus.Members {
+	members := make([]pkgmongo.RsMember, 0, len(inventory.Members))
+	for _, member := range inventory.Members {
 		if member.State != pkgmongo.StatePrimary && member.State != pkgmongo.StateSecondary {
 			continue
 		}
+		members = append(members, member)
+	}
+	loadHost := func(ctx context.Context, member pkgmongo.RsMember) (HostSlowlogSummary, []CollectorStatus, []error) {
 		host := HostSlowlogSummary{
 			Address: member.Name,
 			State:   member.State.String(),
@@ -248,17 +315,62 @@ func (c *Client) replicaSetSlowlogSummary(ctx context.Context, conn *pkgmongo.Co
 		host.Databases, hostStatuses, hostErrors = collectSlowlogDatabaseSummariesPartial(
 			ctx,
 			member.Name,
-			rsStatus.Set,
+			inventory.Name,
 			filteredDBs,
 			opts.Sort,
 			opts.Concurrency,
-			c.databaseSlowlogSummary,
+			func(ctx context.Context, addr, database string, sortValue SlowlogSort) (DatabaseSlowlogSummary, bool, error) {
+				return c.databaseSlowlogSummaryWithLimit(ctx, addr, database, sortValue, capabilityLimit)
+			},
 		)
-		statuses = append(statuses, hostStatuses...)
-		collectorErrors = append(collectorErrors, hostErrors...)
-		result.Hosts = append(result.Hosts, host)
+		return host, hostStatuses, hostErrors
 	}
+	var hosts []HostSlowlogSummary
+	var statuses []CollectorStatus
+	var collectorErrors []error
+	if c.session != nil && c.session.legacy {
+		for _, member := range members {
+			host, hostStatuses, hostErrors := loadHost(ctx, member)
+			hosts = append(hosts, host)
+			statuses = append(statuses, hostStatuses...)
+			collectorErrors = append(collectorErrors, hostErrors...)
+		}
+	} else {
+		hosts, statuses, collectorErrors = collectSlowlogHostsPartial(ctx, members, loadHost)
+	}
+	result.Hosts = append(result.Hosts, hosts...)
 	return result, statuses, collectorErrors
+}
+
+func collectSlowlogHostsPartial(ctx context.Context, members []pkgmongo.RsMember, load slowlogHostLoader) ([]HostSlowlogSummary, []CollectorStatus, []error) {
+	if load == nil {
+		return nil, nil, []error{invalidOptions("slowlog host loader is required")}
+	}
+	type slot struct {
+		host     HostSlowlogSummary
+		statuses []CollectorStatus
+		errors   []error
+	}
+	slots := make([]slot, len(members))
+	group, groupCtx := errgroup.WithContext(ctx)
+	for index, member := range members {
+		index, member := index, member
+		group.Go(func() error {
+			host, statuses, collectorErrors := load(groupCtx, member)
+			slots[index] = slot{host: host, statuses: statuses, errors: collectorErrors}
+			return nil
+		})
+	}
+	_ = group.Wait()
+	hosts := make([]HostSlowlogSummary, 0, len(slots))
+	var statuses []CollectorStatus
+	var collectorErrors []error
+	for _, item := range slots {
+		hosts = append(hosts, item.host)
+		statuses = append(statuses, item.statuses...)
+		collectorErrors = append(collectorErrors, item.errors...)
+	}
+	return hosts, statuses, collectorErrors
 }
 
 func collectSlowlogDatabaseSummariesPartial(ctx context.Context, addr, replicaSet string, dbs []string, sortValue SlowlogSort, concurrency int, load slowlogDatabaseLoader) ([]DatabaseSlowlogSummary, []CollectorStatus, []error) {
@@ -377,6 +489,16 @@ func collectSlowlogDatabaseSummaries(
 }
 
 func (c *Client) databaseSlowlogSummary(ctx context.Context, addr, db string, sort SlowlogSort) (DatabaseSlowlogSummary, bool, error) {
+	return c.databaseSlowlogSummaryWithLimit(ctx, addr, db, sort, nil)
+}
+
+func (c *Client) databaseSlowlogSummaryWithLimit(ctx context.Context, addr, db string, sort SlowlogSort, capabilityLimit *semaphore.Weighted) (DatabaseSlowlogSummary, bool, error) {
+	release, err := c.acquireCapabilityRemoteSlot(ctx, capabilityLimit)
+	if err != nil {
+		return DatabaseSlowlogSummary{}, false, err
+	}
+	defer release()
+
 	conn, err := c.connectAddress(ctx, addr, derivedConnectionOptions{
 		Database: db,
 		Direct:   boolPointer(true),

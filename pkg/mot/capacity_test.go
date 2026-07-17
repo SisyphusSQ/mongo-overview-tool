@@ -1,11 +1,36 @@
 package mot
 
 import (
+	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mongo"
 )
+
+func TestCollectShardCapacityTargetsRunsConcurrentlyAndPreservesOrder(t *testing.T) {
+	// 场景：单个 namespace 的 shard detail 并发采集，结果槽位保持 target 顺序。
+	targets := []hotspotTarget{{Address: "node-1"}, {Address: "node-2"}, {Address: "node-3"}}
+	var current atomic.Int64
+	var maximum atomic.Int64
+
+	result := collectShardCapacityTargets(context.Background(), targets, func(_ context.Context, target hotspotTarget) shardCapacityTargetCollection {
+		running := current.Add(1)
+		defer current.Add(-1)
+		updateMaximum(&maximum, running)
+		time.Sleep(10 * time.Millisecond)
+		return shardCapacityTargetCollection{capacity: &ShardCapacity{Host: target.Address}}
+	})
+	if maximum.Load() <= 1 {
+		t.Fatalf("maximum concurrency = %d, want greater than 1", maximum.Load())
+	}
+	for i, target := range targets {
+		if result[i].capacity == nil || result[i].capacity.Host != target.Address {
+			t.Fatalf("result order changed: %#v", result)
+		}
+	}
+}
 
 func TestDiffCapacityPreservesUnavailableAndCollectionLifecycle(t *testing.T) {
 	// 场景：缺失指标不能按零计算，新增集合也不显示为巨大增长。

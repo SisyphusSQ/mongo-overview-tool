@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cast"
 	"go.mongodb.org/mongo-driver/bson"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mongo"
 )
@@ -18,56 +19,61 @@ import (
 const defaultOverviewNodeConcurrency = 1
 
 type nodeOverviewEnricher func(ctx context.Context, node NodeOverview) (NodeOverview, error)
+type shardOverviewLoader func(ctx context.Context, shard pkgmongo.Shard) (ReplicaSetOverview, error)
 
 // Overview 返回 MongoDB 副本集或分片集群的结构化概览。
 func (c *Client) Overview(ctx context.Context, opts OverviewOptions) (result *OverviewResult, err error) {
+	if c != nil && c.session == nil {
+		return withEphemeralCollectorSession(ctx, c, func(session *CollectorSession) (*OverviewResult, error) {
+			return session.Overview(ctx, opts)
+		})
+	}
 	defer func() {
 		err = mapContextError(err)
 	}()
 	if err := c.requireMemberConnectionURI(); err != nil {
 		return nil, err
 	}
-	cluster, err := pkgmongo.DetectCluster(ctx, c.conn)
+	cluster, err := c.detectCluster(ctx)
 	if err != nil {
 		return nil, err
 	}
 	result = &OverviewResult{
 		ClusterType: convertClusterType(cluster.Type),
 	}
+	nodeConcurrency := opts.NodeConcurrency
+	if nodeConcurrency <= 0 {
+		nodeConcurrency = defaultOverviewNodeConcurrency
+	}
+	nodeLimit := semaphore.NewWeighted(int64(nodeConcurrency))
 
 	switch cluster.Type {
 	case pkgmongo.ClusterRepl:
-		rs, err := c.replicaSetOverview(ctx, c.conn, opts.NodeConcurrency)
+		rs, err := c.replicaSetOverview(ctx, c.conn, "base", opts.NodeConcurrency, nodeLimit)
 		if err != nil {
 			return nil, err
 		}
 		result.ReplicaSets = append(result.ReplicaSets, rs)
 		result.Hosts = append(result.Hosts, replicaHosts(rs.Nodes)...)
 	case pkgmongo.ClusterShard:
-		shards, err := c.conn.ListShards(ctx)
+		shards, err := c.listShards(ctx)
 		if err != nil {
 			return nil, err
 		}
 		result.Hosts = shardHosts(shards)
-		for _, shard := range shards.Shards {
-			replicaSet, addresses, err := parseShardHost(shard.Host)
-			if err != nil {
-				return nil, err
-			}
-			conn, err := c.connectAddress(ctx, addresses, derivedConnectionOptions{
-				ReplicaSet: replicaSet,
-				Direct:     boolPointer(false),
+		if c.session != nil && !c.session.legacy {
+			result.ReplicaSets, err = collectShardOverviews(ctx, shards.Shards, c.session.maxConcurrency, func(ctx context.Context, shard pkgmongo.Shard) (ReplicaSetOverview, error) {
+				return c.shardOverview(ctx, shard, opts.NodeConcurrency, nodeLimit)
 			})
 			if err != nil {
 				return nil, err
 			}
-			rs, err := c.replicaSetOverview(ctx, conn, opts.NodeConcurrency)
-			c.closeDerivedConnection(ctx, conn)
+			break
+		}
+		for _, shard := range shards.Shards {
+			rs, err := c.shardOverview(ctx, shard, opts.NodeConcurrency, nodeLimit)
 			if err != nil {
 				return nil, err
-			}
-			if rs.Name == "" {
-				rs.Name = shard.Id
 			}
 			result.ReplicaSets = append(result.ReplicaSets, rs)
 		}
@@ -81,11 +87,69 @@ func (c *Client) Overview(ctx context.Context, opts OverviewOptions) (result *Ov
 	return result, nil
 }
 
-func (c *Client) replicaSetOverview(ctx context.Context, conn *pkgmongo.Conn, concurrency int) (ReplicaSetOverview, error) {
-	rsStatus, err := conn.RsStatus(ctx)
+func (c *Client) shardOverview(ctx context.Context, shard pkgmongo.Shard, nodeConcurrency int, nodeLimit *semaphore.Weighted) (ReplicaSetOverview, error) {
+	replicaSet, addresses, err := parseShardHost(shard.Host)
 	if err != nil {
 		return ReplicaSetOverview{}, err
 	}
+	conn, err := c.connectAddress(ctx, addresses, derivedConnectionOptions{
+		ReplicaSet: replicaSet,
+		Direct:     boolPointer(false),
+	})
+	if err != nil {
+		return ReplicaSetOverview{}, err
+	}
+	defer c.closeDerivedConnection(ctx, conn)
+
+	result, err := c.replicaSetOverview(ctx, conn, replicaSet, nodeConcurrency, nodeLimit)
+	if err != nil {
+		return ReplicaSetOverview{}, err
+	}
+	if result.Name == "" {
+		result.Name = shard.Id
+	}
+	return result, nil
+}
+
+func collectShardOverviews(ctx context.Context, shards []pkgmongo.Shard, concurrency int, load shardOverviewLoader) ([]ReplicaSetOverview, error) {
+	if load == nil {
+		return nil, invalidOptions("shard overview loader is required")
+	}
+	if concurrency <= 0 {
+		concurrency = defaultCollectorSessionConcurrency
+	}
+
+	result := make([]ReplicaSetOverview, len(shards))
+	errs := make([]error, len(shards))
+	group := new(errgroup.Group)
+	group.SetLimit(concurrency)
+	for i := range shards {
+		i := i
+		group.Go(func() error {
+			result[i], errs[i] = load(ctx, shards[i])
+			return nil
+		})
+	}
+	_ = group.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func (c *Client) replicaSetOverview(ctx context.Context, conn *pkgmongo.Conn, inventoryKey string, concurrency int, nodeLimit *semaphore.Weighted) (ReplicaSetOverview, error) {
+	release, err := c.acquireRemoteSlot(ctx)
+	if err != nil {
+		return ReplicaSetOverview{}, err
+	}
+	rsStatus, err := conn.RsStatus(ctx)
+	release()
+	if err != nil {
+		return ReplicaSetOverview{}, err
+	}
+	c.rememberReplicaSetInventory(inventoryKey, rsStatus)
 	result := ReplicaSetOverview{Name: rsStatus.Set}
 
 	var primaryOptime int64
@@ -107,7 +171,9 @@ func (c *Client) replicaSetOverview(ctx context.Context, conn *pkgmongo.Conn, co
 		result.Nodes = append(result.Nodes, node)
 	}
 
-	result.Nodes, err = enrichNodeOverviews(ctx, result.Nodes, concurrency, c.enrichNodeOverview)
+	result.Nodes, err = enrichNodeOverviews(ctx, result.Nodes, concurrency, func(ctx context.Context, node NodeOverview) (NodeOverview, error) {
+		return c.enrichNodeOverviewWithLimit(ctx, node, nodeLimit)
+	})
 	if err != nil {
 		return ReplicaSetOverview{}, err
 	}
@@ -158,6 +224,16 @@ func enrichNodeOverviews(ctx context.Context, nodes []NodeOverview, concurrency 
 }
 
 func (c *Client) enrichNodeOverview(ctx context.Context, node NodeOverview) (NodeOverview, error) {
+	return c.enrichNodeOverviewWithLimit(ctx, node, nil)
+}
+
+func (c *Client) enrichNodeOverviewWithLimit(ctx context.Context, node NodeOverview, nodeLimit *semaphore.Weighted) (NodeOverview, error) {
+	release, err := c.acquireCapabilityRemoteSlot(ctx, nodeLimit)
+	if err != nil {
+		return node, err
+	}
+	defer release()
+
 	conn, err := c.connectAddress(ctx, node.Address, derivedConnectionOptions{Direct: boolPointer(true)})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrCancelled) {

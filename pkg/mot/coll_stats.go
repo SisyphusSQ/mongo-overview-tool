@@ -19,6 +19,11 @@ var systemDatabases = []string{"admin", "config", "local"}
 
 // CollectionStats 返回数据库和集合统计信息。
 func (c *Client) CollectionStats(ctx context.Context, opts CollectionStatsOptions) (result *CollectionStatsResult, err error) {
+	if c != nil && c.session == nil {
+		return withEphemeralCollectorSession(ctx, c, func(session *CollectorSession) (*CollectionStatsResult, error) {
+			return session.CollectionStats(ctx, opts)
+		})
+	}
 	defer func() {
 		err = mapContextError(err)
 	}()
@@ -26,11 +31,11 @@ func (c *Client) CollectionStats(ctx context.Context, opts CollectionStatsOption
 		return nil, err
 	}
 	if opts.RequireShardedCluster || opts.ShardedOnly {
-		isSharding, err := c.conn.IsSharding(ctx)
+		cluster, err := c.detectClusterTopology(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if !isSharding {
+		if cluster.Type != pkgmongo.ClusterShard {
 			return nil, fmt.Errorf("%w", ErrNotSharded)
 		}
 	}
@@ -39,7 +44,7 @@ func (c *Client) CollectionStats(ctx context.Context, opts CollectionStatsOption
 		limit = defaultCollectionStatsConcurrency
 	}
 
-	dbs, err := c.conn.Client.ListDatabaseNames(ctx, bson.D{})
+	dbs, err := c.databaseNames(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -62,9 +67,13 @@ func (c *Client) CollectionStats(ctx context.Context, opts CollectionStatsOption
 
 func (c *Client) databaseStats(ctx context.Context, db string, opts CollectionStatsOptions, limit int) (DatabaseStats, error) {
 	dbConn := c.conn.Client.Database(db)
-	colls, err := dbConn.ListCollectionNames(ctx, bson.D{})
+	metadata, err := c.collectionMetadata(ctx, db)
 	if err != nil {
 		return DatabaseStats{}, err
+	}
+	colls := make([]string, 0, len(metadata))
+	for _, item := range metadata {
+		colls = append(colls, item.Name)
 	}
 
 	var (
@@ -79,6 +88,11 @@ func (c *Client) databaseStats(ctx context.Context, db string, opts CollectionSt
 			continue
 		}
 		group.Go(func() error {
+			release, err := c.acquireRemoteSlot(ctx)
+			if err != nil {
+				return err
+			}
+			defer release()
 			var stats pkgmongo.CollStats
 			if err := dbConn.RunCommand(ctx, bson.D{{Key: "collStats", Value: coll}}).Decode(&stats); err != nil {
 				return err
@@ -110,7 +124,12 @@ func (c *Client) databaseStats(ctx context.Context, db string, opts CollectionSt
 		return collStats[i].Count > collStats[j].Count
 	})
 
+	release, err := c.acquireRemoteSlot(ctx)
+	if err != nil {
+		return DatabaseStats{}, err
+	}
 	rawDBStats, err := c.conn.DBStatus(ctx, db)
+	release()
 	if err != nil {
 		return DatabaseStats{}, err
 	}

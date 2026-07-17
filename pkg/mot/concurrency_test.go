@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mongo"
 )
 
 func TestEnrichNodeOverviewsHonorsConcurrencyAndOrder(t *testing.T) {
@@ -62,6 +64,34 @@ func TestEnrichNodeOverviewsDefaultsToSerial(t *testing.T) {
 	}
 	if maximum.Load() != 1 {
 		t.Fatalf("maximum concurrency = %d, want 1", maximum.Load())
+	}
+}
+
+func TestCollectShardOverviewsHonorsConcurrencyAndOrder(t *testing.T) {
+	// 测试显式 session 的 shard 外层并发受限，并保持 listShards 返回顺序。
+	shards := []pkgmongo.Shard{
+		{Id: "shard-1"},
+		{Id: "shard-2"},
+		{Id: "shard-3"},
+		{Id: "shard-4"},
+	}
+	var current atomic.Int64
+	var maximum atomic.Int64
+	result, err := collectShardOverviews(context.Background(), shards, 2, func(_ context.Context, shard pkgmongo.Shard) (ReplicaSetOverview, error) {
+		running := current.Add(1)
+		defer current.Add(-1)
+		updateMaximum(&maximum, running)
+		time.Sleep(10 * time.Millisecond)
+		return ReplicaSetOverview{Name: shard.Id}, nil
+	})
+	if err != nil {
+		t.Fatalf("collectShardOverviews failed: %v", err)
+	}
+	if maximum.Load() != 2 {
+		t.Fatalf("maximum concurrency = %d, want 2", maximum.Load())
+	}
+	if len(result) != 4 || result[0].Name != "shard-1" || result[3].Name != "shard-4" {
+		t.Fatalf("result order changed: %#v", result)
 	}
 }
 

@@ -24,6 +24,7 @@ type Client struct {
 	opts            Options
 	uri             string
 	logger          Logger
+	session         *CollectorSession
 }
 
 type derivedConnectionOptions struct {
@@ -135,6 +136,9 @@ func (c *Client) requireMemberConnectionURI() error {
 }
 
 func (c *Client) connectAddress(ctx context.Context, addr string, target derivedConnectionOptions) (*pkgmongo.Conn, error) {
+	if c != nil && c.session != nil {
+		return c.session.derivedConnection(ctx, addr, target)
+	}
 	if err := c.requireConn(); err != nil {
 		return nil, err
 	}
@@ -153,6 +157,9 @@ func (c *Client) connectAddress(ctx context.Context, addr string, target derived
 
 func (c *Client) closeDerivedConnection(ctx context.Context, conn *pkgmongo.Conn) {
 	if conn == nil {
+		return
+	}
+	if c != nil && c.session != nil {
 		return
 	}
 	closeCtx, cancel := cleanupContext(ctx)

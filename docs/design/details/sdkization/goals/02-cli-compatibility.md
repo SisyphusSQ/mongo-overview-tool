@@ -31,7 +31,8 @@ mot version
 
 ```text
 --uri
---host / -t
+--target / -t（完整 host:port）
+--host
 --port / -P
 --username / -u
 --password / -p
@@ -47,6 +48,8 @@ MONGO_PASS
 ```
 
 这些入口在 SDK 化过程中默认保持。
+
+连接地址兼容规则：`-t/--target` 接收完整 `host:port`，默认值为 `127.0.0.1:27017`；`--host` 与 `-P/--port` 保留用于拆分传参。显式 `--target` 覆盖拆分的 host/port，`--uri` 继续拥有最高优先级。
 
 ## 兼容策略
 

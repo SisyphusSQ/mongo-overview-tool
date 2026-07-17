@@ -93,7 +93,7 @@ Expand-Archive -Path .\mot.windows.amd64.zip -DestinationPath .\mot
 在已有 Go module 中，先在代码中导入下方的 `pkg/mot`，再添加依赖并整理 module：
 
 ```bash
-go get github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot@v2.2.0
+go get github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot@v2.2.1
 go mod tidy
 ```
 
@@ -119,7 +119,7 @@ func main() {
 再添加依赖、整理 module 并运行：
 
 ```bash
-go get github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot@v2.2.0
+go get github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot@v2.2.1
 go mod tidy
 go run .
 ```
@@ -145,6 +145,28 @@ defer func() {
 overview, err := client.Overview(ctx, mot.OverviewOptions{IncludeHosts: true})
 ```
 
+一次只调用一个只读能力时，直接使用 `Client` 即可。一次上层请求需要调用多个只读能力时，应创建一个请求级 `CollectorSession`，让这些能力共享拓扑发现、目录清单和派生成员连接：
+
+```go
+session, err := client.NewCollectorSession(mot.CollectorSessionOptions{
+    MaxConcurrency: 4,
+})
+if err != nil {
+    return err
+}
+defer func() {
+    closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    _ = session.Close(closeCtx)
+}()
+
+overview, overviewErr := session.Overview(ctx, mot.OverviewOptions{NodeConcurrency: 2})
+doctor, doctorErr := session.Doctor(ctx, mot.DoctorOptions{NodeConcurrency: 2})
+stats := session.Stats()
+```
+
+一个 session 只服务一次上层请求，可以被该请求内的多个 capability 并发使用，但调用方必须等待它们全部结束后再 `Close`。session 不跨请求、定时任务轮次或租户复用；关闭 session 后再关闭基础 `Client`。`BulkDelete` 和 `BulkUpdate` 继续直接使用 `Client`。CLI 每次只执行一个命令并退出，因此不需要自行管理 session，现有 `Client` 方法会使用兼容包装保持原行为。
+
 SDK 入口返回结构化 result，不返回 CLI 表格字符串；SDK 核心不读取环境变量，CLI 或示例应用层负责读取后显式组装 `mot.Options`。更多示例见：
 
 - `examples/sdk/overview`
@@ -153,7 +175,7 @@ SDK 入口返回结构化 result，不返回 CLI 表格字符串；SDK 核心不
 - `examples/sdk/diagnostics`
 - `examples/sdk/index_consistency`
 
-其中 `diagnostics` 展示 `Doctor`、`CurrentOperations`、`Hotspot`、通用 `IndexAudit`、`Capacity` 和 `SlowlogSummary` 的只读 SDK 调用；`index_consistency` 展示 MongoDB 3.4–7.x 分片集合索引一致性检查。完整运行方式和环境变量见 `examples/sdk/README.md`。
+其中 `diagnostics` 展示在一次 `CollectorSession` 中依次调用全部只读能力，并输出不含连接信息的 session 统计摘要；`index_consistency` 展示 MongoDB 3.4–7.x 分片集合索引一致性检查。完整运行方式和环境变量见 `examples/sdk/README.md`。
 
 真实 MongoDB 集成测试需显式启用：
 
@@ -162,23 +184,45 @@ MOT_TEST_MONGO_URI='mongodb://user:pass@127.0.0.1:27017/admin' \
   go test -tags=integration ./pkg/mongo ./pkg/mot
 ```
 
-SDK 只读 live E2E 使用独立的 host/port 环境变量，并从现有 `MONGO_USER` / `MONGO_PASS` 读取认证信息；测试覆盖 Overview、CollectionStats、SlowlogSummary 和 SlowlogDetail，不执行 bulk-delete / bulk-update：
+SDK 只读 live E2E 使用独立的 host/port 环境变量，并从现有 `MONGO_USER` / `MONGO_PASS` 读取认证信息；测试覆盖全部九个只读 capability，不执行 bulk-delete / bulk-update：
 
 ```bash
 MOT_TEST_MONGO_HOST='<host>' \
 MOT_TEST_MONGO_PORT='<port>' \
 MOT_TEST_EXPECT_CLUSTER='repl|sharding' \
 go test -tags=integration -count=1 -v \
-  -run '^TestLiveSDKReadOnlyE2E$' ./pkg/mot
+  -run '^TestLiveSDKReadOnlyE2E(Legacy|Session)$' ./pkg/mot
 ```
 
-该 live E2E 还覆盖 `Doctor`、`CurrentOperations`、`Hotspot`、通用 `IndexAudit`、`Capacity` 和增强后的 slowlog insight。分片集合索引一致性使用独立的 `TestLiveIndexConsistencyReadOnlyE2E` 和预置 namespace 环境变量。测试会读取真实 routing metadata、shard 索引定义和诊断统计，但不会创建数据、修改 Profiler、变更索引或执行维护命令。
+`Legacy` 和 `Session` 使用相同 scope、权限和 capability 参数；做性能验收时应按 Legacy → Session → Session → Legacy → Legacy → Session 的顺序分别运行并比较三次中位数。该 live E2E 还覆盖 `Doctor`、`CurrentOperations`、`Hotspot`、通用 `IndexAudit`、`Capacity` 和增强后的 slowlog insight。分片集合索引一致性使用独立的 `TestLiveIndexConsistencyReadOnlyE2E` 和预置 namespace 环境变量。测试会读取真实 routing metadata、shard 索引定义和诊断统计，但不会创建数据、修改 Profiler、变更索引或执行维护命令。
+
+### CollectorSession Live E2E 结果（2026-07-17）
+
+本次使用相同账号、scope 和 capability 参数，在 MongoDB 3.4、4.2、7.0 的复制集和 6 replica set / 18 节点分片集群中完成交替实测。六个目标共 36 次 Legacy / Session 矩阵全部通过，另有一次 Session smoke 通过：
+
+| MongoDB | 拓扑 | Legacy 中位耗时 | Session 中位耗时 | 降幅 |
+| --- | --- | ---: | ---: | ---: |
+| 3.4 | 复制集 | 9.892 秒 | 3.164 秒 | 68.0% |
+| 3.4 | 6×18 分片集群 | 55.981 秒 | 10.694 秒 | 80.9% |
+| 4.2 | 复制集 | 7.983 秒 | 2.712 秒 | 66.0% |
+| 4.2 | 6×18 分片集群 | 60.560 秒 | 16.641 秒 | 72.5% |
+| 7.0 | 复制集 | 10.367 秒 | 3.811 秒 | 63.2% |
+| 7.0 | 6×18 分片集群 | 73.306 秒 | 15.306 秒 | 79.1% |
+
+三个分片环境的 Session 中位耗时均低于 45 秒，且相对 Legacy 的降幅均超过 35%。每次分片 Session 都只加载一次 topology 和一次 shard inventory，派生连接数为 24，远程采集峰值并发为 4。MongoDB 3.4、4.2、7.0 的显式 Session 索引一致性检查也全部通过，分别命中 `direct_list_indexes`、`index_stats`、`check_metadata_consistency` 三条版本策略，结果均为 complete、consistent 且未触发 fallback。
+
+本轮同时验证了 `-t/--target host:port` 在三个分片版本上的连接行为，以及 `--host` 配合 `-P/--port` 的兼容入口。完整测试、race、vet、harness、构建、integration build-only 和 benchmark 均通过；测试过程没有执行 Bulk、数据或索引写入，也没有记录集群地址、业务 namespace 或认证信息。
+
+结论：请求级 `CollectorSession` 优化已达到当前 SDK 上线门槛。接入方需要在一次上层请求内创建并复用同一个 session，才能获得上述拓扑、连接和并发调度收益；单能力 `Client` 调用和 CLI 行为继续保持兼容。DBBridge 及其他接入方的适配不包含在当前 SDK 分支中。
 
 ### 1. 命令行参数（推荐）
 
 ```bash
-# 使用 host/port
-mot overview -t 127.0.0.1 -P 27017 -u root -p password --authSource admin
+# 使用完整 target（推荐）
+mot overview -t 127.0.0.1:27017 -u root -p password --authSource admin
+
+# 分别指定 host/port
+mot overview --host 127.0.0.1 -P 27017 -u root -p password --authSource admin
 
 # 使用 URI
 mot overview --uri "mongodb://root:password@127.0.0.1:27017/admin"
@@ -191,7 +235,7 @@ mot overview --uri "mongodb://root:password@127.0.0.1:27017/admin"
 ```bash
 export MONGO_USER=root
 export MONGO_PASS=password
-mot overview -t 127.0.0.1 -P 27017
+mot overview -t 127.0.0.1:27017
 ```
 
 ### 通用参数
@@ -201,7 +245,8 @@ mot overview -t 127.0.0.1 -P 27017
 | 参数 | 简写 | 描述 | 默认值 |
 | :--- | :--- | :--- | :--- |
 | `--uri` | | MongoDB 连接 URI (覆盖其他连接参数) | "" |
-| `--host` | `-t` | 目标主机 IP | 127.0.0.1 |
+| `--target` | `-t` | 完整目标地址（host:port） | 127.0.0.1:27017 |
+| `--host` | | 目标主机 IP | 127.0.0.1 |
 | `--port` | `-P` | 目标端口 | 27017 |
 | `--username` | `-u` | 认证用户名 | "" |
 | `--password` | `-p` | 认证密码 | "" |
@@ -406,7 +451,7 @@ mot bulk-delete -d mydb -c users \
 mot bulk-delete -d mydb -c users -f '{"status":"inactive"}' --dry-run
 
 # 执行删除：删除 mydb.users 中 status=inactive 的文档，每批 500 条，每批间隔 200ms
-mot bulk-delete -t 10.0.0.1 -P 27017 \
+mot bulk-delete -t 10.0.0.1:27017 \
   -d mydb -c users \
   -f '{"status":"inactive"}' \
   -b 500 --pause-ms 200

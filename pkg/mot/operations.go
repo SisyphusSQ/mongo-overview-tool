@@ -66,6 +66,11 @@ type CurrentOperationsResult struct {
 
 // CurrentOperations 返回经过服务端投影和 SDK 脱敏的活跃操作。
 func (c *Client) CurrentOperations(ctx context.Context, opts CurrentOperationsOptions) (*CurrentOperationsResult, error) {
+	if c != nil && c.session == nil {
+		return withEphemeralCollectorSession(ctx, c, func(session *CollectorSession) (*CurrentOperationsResult, error) {
+			return session.CurrentOperations(ctx, opts)
+		})
+	}
 	normalized, err := normalizeCurrentOperationsOptions(opts)
 	if err != nil {
 		return nil, err
@@ -76,7 +81,7 @@ func (c *Client) CurrentOperations(ctx context.Context, opts CurrentOperationsOp
 	if err := c.requireConn(); err != nil {
 		return nil, err
 	}
-	cluster, err := pkgmongo.DetectCluster(ctx, c.conn)
+	cluster, err := c.detectCluster(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -91,6 +96,11 @@ func (c *Client) CurrentOperations(ctx context.Context, opts CurrentOperationsOp
 		Databases:               normalized.Databases, Namespaces: normalized.Namespaces,
 		Limit: normalized.Limit, MaxTime: normalized.MaxTime,
 	}
+	release, err := c.acquireRemoteSlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	raw, source, visibility, status, collectErr := collectCurrentOperationsWithVisibility(query, func(query pkgmongo.CurrentOperationsQuery) ([]pkgmongo.CurrentOperationSnapshot, string, error) {
 		return c.collectCurrentOperations(ctx, query, cluster.MaxWireVersion)
 	})

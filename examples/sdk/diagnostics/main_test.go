@@ -11,12 +11,25 @@ import (
 )
 
 type fakeDiagnosticsClient struct {
-	doctorOptions     mot.DoctorOptions
-	operationsOptions mot.CurrentOperationsOptions
-	hotspotOptions    mot.HotspotOptions
-	indexOptions      mot.IndexAuditOptions
-	capacityOptions   mot.CapacityOptions
-	slowlogOptions    mot.SlowlogOptions
+	overviewOptions    mot.OverviewOptions
+	collectionOptions  mot.CollectionStatsOptions
+	doctorOptions      mot.DoctorOptions
+	operationsOptions  mot.CurrentOperationsOptions
+	hotspotOptions     mot.HotspotOptions
+	indexOptions       mot.IndexAuditOptions
+	capacityOptions    mot.CapacityOptions
+	slowlogOptions     mot.SlowlogOptions
+	slowlogDetailCalls int
+}
+
+func (f *fakeDiagnosticsClient) Overview(_ context.Context, opts mot.OverviewOptions) (*mot.OverviewResult, error) {
+	f.overviewOptions = opts
+	return &mot.OverviewResult{ClusterType: mot.ClusterSharded, ReplicaSets: make([]mot.ReplicaSetOverview, 2)}, nil
+}
+
+func (f *fakeDiagnosticsClient) CollectionStats(_ context.Context, opts mot.CollectionStatsOptions) (*mot.CollectionStatsResult, error) {
+	f.collectionOptions = opts
+	return &mot.CollectionStatsResult{Databases: make([]mot.DatabaseStats, 1)}, nil
 }
 
 func (f *fakeDiagnosticsClient) Doctor(_ context.Context, opts mot.DoctorOptions) (*mot.DoctorResult, error) {
@@ -58,7 +71,18 @@ func (f *fakeDiagnosticsClient) Capacity(_ context.Context, opts mot.CapacityOpt
 
 func (f *fakeDiagnosticsClient) SlowlogSummary(_ context.Context, opts mot.SlowlogOptions) (*mot.SlowlogSummaryResult, error) {
 	f.slowlogOptions = opts
-	return &mot.SlowlogSummaryResult{ReplicaSets: make([]mot.ReplicaSetSlowlogSummary, 2)}, nil
+	return &mot.SlowlogSummaryResult{ReplicaSets: []mot.ReplicaSetSlowlogSummary{
+		{Name: "rs-1", Hosts: []mot.HostSlowlogSummary{{Address: "node-1", Databases: []mot.DatabaseSlowlogSummary{{Database: "app", Items: []mot.SlowlogSummaryItem{{QueryHash: "hash-1"}}}}}}},
+		{Name: "rs-2"},
+	}}, nil
+}
+
+func (f *fakeDiagnosticsClient) SlowlogDetail(_ context.Context, db, queryHash string) (*mot.SlowlogDetailResult, error) {
+	f.slowlogDetailCalls++
+	if db != "app" || queryHash != "hash-1" {
+		return nil, errors.New("unexpected slowlog detail target")
+	}
+	return &mot.SlowlogDetailResult{Namespace: "app.orders"}, nil
 }
 
 func TestLoadConfigUsesSeparateCredentials(t *testing.T) {
@@ -100,6 +124,9 @@ func TestCollectDiagnosticsAcceptsPartialResults(t *testing.T) {
 	if summary.ClusterType != mot.ClusterSharded || summary.OperationSource != "aggregation" {
 		t.Fatalf("summary = %#v", summary)
 	}
+	if summary.OverviewReplicaSets != 2 || summary.CollectionStatsDatabases != 1 || !summary.SlowlogDetailLoaded {
+		t.Fatalf("shared session capability counts = %#v", summary)
+	}
 	if summary.DoctorFindings != 2 || summary.Operations != 4 || summary.HotspotNodes != 5 || summary.HotspotNamespaces != 6 {
 		t.Fatalf("diagnostic counts = %#v", summary)
 	}
@@ -124,5 +151,8 @@ func TestCollectDiagnosticsAcceptsPartialResults(t *testing.T) {
 	}
 	if !slices.Equal(client.slowlogOptions.Databases, []string{"app"}) {
 		t.Fatalf("slowlog options = %#v", client.slowlogOptions)
+	}
+	if client.slowlogDetailCalls != 1 || !client.overviewOptions.IncludeHosts || !slices.Equal(client.collectionOptions.Databases, []string{"app"}) {
+		t.Fatalf("shared session calls were incomplete: %#v", client)
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
@@ -104,8 +103,21 @@ type indexCollectionMetadata struct {
 	Type string `bson:"type"`
 }
 
+type indexAuditTargetCollection struct {
+	indexes  []IndexObservation
+	statuses []CollectorStatus
+	errors   []error
+}
+
+type indexAuditTargetLoader func(ctx context.Context, target hotspotTarget) indexAuditTargetCollection
+
 // IndexAudit 执行通用索引使用、定义、空间和跨 shard 一致性审计。
 func (c *Client) IndexAudit(ctx context.Context, opts IndexAuditOptions) (result *IndexAuditResult, err error) {
+	if c != nil && c.session == nil {
+		return withEphemeralCollectorSession(ctx, c, func(session *CollectorSession) (*IndexAuditResult, error) {
+			return session.IndexAudit(ctx, opts)
+		})
+	}
 	opts, err = normalizeIndexAuditOptions(opts)
 	if err != nil {
 		return nil, err
@@ -114,7 +126,7 @@ func (c *Client) IndexAudit(ctx context.Context, opts IndexAuditOptions) (result
 		return nil, err
 	}
 	defer func() { err = mapContextError(err) }()
-	cluster, err := pkgmongo.DetectClusterTopology(ctx, c.conn)
+	cluster, err := c.detectClusterTopology(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -159,21 +171,14 @@ func (c *Client) IndexAudit(ctx context.Context, opts IndexAuditOptions) (result
 		collectorErrors = append(collectorErrors, discoveryErrors...)
 		var mu sync.Mutex
 		group, groupCtx := errgroup.WithContext(ctx)
-		limit := semaphore.NewWeighted(int64(opts.Concurrency))
+		capabilityLimit := semaphore.NewWeighted(int64(opts.Concurrency))
 		for _, ref := range refs {
 			if ref.Type != "collection" {
 				continue
 			}
-			if acquireErr := acquireDiagnosticSlot(groupCtx, limit); acquireErr != nil {
-				mu.Lock()
-				collectorErrors = append(collectorErrors, acquireErr)
-				mu.Unlock()
-				break
-			}
 			ref := ref
 			group.Go(func() error {
-				defer limit.Release(1)
-				collection, statuses, collectErrors := c.collectIndexAuditCollection(groupCtx, ref, targets, opts, result.CollectedAt, cluster.Type == pkgmongo.ClusterRepl)
+				collection, statuses, collectErrors := c.collectIndexAuditCollection(groupCtx, ref, targets, opts, result.CollectedAt, cluster.Type == pkgmongo.ClusterRepl, capabilityLimit)
 				mu.Lock()
 				collectionsByNamespace[collection.Namespace] = mergeIndexAuditCollections(collectionsByNamespace[collection.Namespace], collection)
 				result.CollectorStatuses = append(result.CollectorStatuses, statuses...)
@@ -264,7 +269,7 @@ func normalizeIndexAuditOptions(opts IndexAuditOptions) (IndexAuditOptions, erro
 }
 
 func (c *Client) indexCollectionRefs(ctx context.Context, opts IndexAuditOptions) ([]indexCollectionRef, error) {
-	dbs, err := c.conn.Client.ListDatabaseNames(ctx, bson.D{})
+	dbs, err := c.databaseNames(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -276,30 +281,10 @@ func (c *Client) indexCollectionRefs(ctx context.Context, opts IndexAuditOptions
 		if !opts.AllDatabases && !stringIncluded(opts.Databases, database) {
 			continue
 		}
-		cursor, listErr := c.conn.Client.Database(database).ListCollections(ctx, bson.D{})
+		metadataValues, listErr := c.collectionMetadata(ctx, database)
 		if listErr != nil {
 			return nil, listErr
 		}
-		var metadataValues []indexCollectionMetadata
-		for cursor.Next(ctx) {
-			var metadata indexCollectionMetadata
-			if decodeErr := cursor.Decode(&metadata); decodeErr != nil {
-				closeCtx, cancel := cleanupContext(ctx)
-				_ = cursor.Close(closeCtx)
-				cancel()
-				return nil, decodeErr
-			}
-			metadataValues = append(metadataValues, metadata)
-		}
-		if cursorErr := cursor.Err(); cursorErr != nil {
-			closeCtx, cancel := cleanupContext(ctx)
-			_ = cursor.Close(closeCtx)
-			cancel()
-			return nil, cursorErr
-		}
-		closeCtx, cancel := cleanupContext(ctx)
-		_ = cursor.Close(closeCtx)
-		cancel()
 		refs = append(refs, selectIndexCollectionRefs(database, metadataValues, opts.Collections)...)
 		if opts.MaxCollections > 0 && len(refs) > opts.MaxCollections {
 			return nil, invalidOptions("selected collections exceed max %d", opts.MaxCollections)
@@ -325,12 +310,18 @@ func selectIndexCollectionRefs(database string, metadata []indexCollectionMetada
 	return refs
 }
 
-func (c *Client) collectIndexAuditCollection(ctx context.Context, ref indexCollectionRef, targets []hotspotTarget, opts IndexAuditOptions, now time.Time, ownershipKnown bool) (CollectionIndexAudit, []CollectorStatus, []error) {
+func (c *Client) collectIndexAuditCollection(ctx context.Context, ref indexCollectionRef, targets []hotspotTarget, opts IndexAuditOptions, now time.Time, ownershipKnown bool, capabilityLimit *semaphore.Weighted) (CollectionIndexAudit, []CollectorStatus, []error) {
 	namespace := ref.Database + "." + ref.Collection
 	result := CollectionIndexAudit{Namespace: namespace}
 	var statuses []CollectorStatus
 	var collectorErrors []error
+	var capacity pkgmongo.CollectionCapacitySnapshot
+	release, acquireErr := c.acquireCapabilityRemoteSlot(ctx, capabilityLimit)
+	if acquireErr != nil {
+		return result, nil, []error{acquireErr}
+	}
 	capacity, capacityErr := c.conn.CollectionCapacity(ctx, ref.Database, ref.Collection, false, 5*time.Second)
+	release()
 	if capacityErr == nil {
 		result.DataSizeBytes, result.IndexSizeBytes = capacity.DataSizeBytes, capacity.TotalIndexSizeBytes
 		if result.DataSizeBytes != nil && *result.DataSizeBytes > 0 && result.IndexSizeBytes != nil {
@@ -340,28 +331,35 @@ func (c *Client) collectIndexAuditCollection(ctx context.Context, ref indexColle
 	} else {
 		collectorErrors = append(collectorErrors, capacityErr)
 	}
-	for _, target := range targets {
+	targetResults := collectIndexAuditTargets(ctx, targets, func(ctx context.Context, target hotspotTarget) indexAuditTargetCollection {
 		scope := FindingScope{Type: ScopeNamespace, ReplicaSet: target.ReplicaSet, Shard: target.Shard, Node: target.Address, Database: ref.Database, Namespace: namespace}
+		release, acquireErr := c.acquireCapabilityRemoteSlot(ctx, capabilityLimit)
+		if acquireErr != nil {
+			return indexAuditTargetCollection{errors: []error{acquireErr}}
+		}
+		defer release()
 		conn, connectErr := c.connectAddress(ctx, target.Address, derivedConnectionOptions{Direct: boolPointer(true)})
 		if connectErr != nil {
-			collectorErrors = append(collectorErrors, connectErr)
-			statuses = append(statuses, failedCollectorStatus("index_usage", scope, connectErr))
-			continue
-		}
-		stats, statsErr := conn.IndexStats(ctx, ref.Database, ref.Collection, 5*time.Second)
-		c.closeDerivedConnection(ctx, conn)
-		if statsErr != nil {
-			if isUnsupportedDiagnosticError(statsErr) {
-				statuses = append(statuses, CollectorStatus{Name: "index_usage", State: CapabilityUnsupported, Scope: scope, ReasonCode: "unsupported_version", Message: "$indexStats 在当前服务器上不可用"})
-			} else if isUnauthorizedError(statsErr) {
-				statuses = append(statuses, failedCollectorStatus("index_usage", scope, statsErr))
-			} else {
-				collectorErrors = append(collectorErrors, statsErr)
-				statuses = append(statuses, failedCollectorStatus("index_usage", scope, statsErr))
+			return indexAuditTargetCollection{
+				statuses: []CollectorStatus{failedCollectorStatus("index_usage", scope, connectErr)},
+				errors:   []error{connectErr},
 			}
-			continue
 		}
-		statuses = append(statuses, CollectorStatus{Name: "index_usage", State: CapabilitySupported, Scope: scope})
+		defer c.closeDerivedConnection(ctx, conn)
+		stats, statsErr := conn.IndexStats(ctx, ref.Database, ref.Collection, 5*time.Second)
+		if statsErr != nil {
+			item := indexAuditTargetCollection{}
+			if isUnsupportedDiagnosticError(statsErr) {
+				item.statuses = append(item.statuses, CollectorStatus{Name: "index_usage", State: CapabilityUnsupported, Scope: scope, ReasonCode: "unsupported_version", Message: "$indexStats 在当前服务器上不可用"})
+			} else if isUnauthorizedError(statsErr) {
+				item.statuses = append(item.statuses, failedCollectorStatus("index_usage", scope, statsErr))
+			} else {
+				item.errors = append(item.errors, statsErr)
+				item.statuses = append(item.statuses, failedCollectorStatus("index_usage", scope, statsErr))
+			}
+			return item
+		}
+		item := indexAuditTargetCollection{statuses: []CollectorStatus{{Name: "index_usage", State: CapabilitySupported, Scope: scope}}}
 		for _, stat := range stats {
 			observation := indexObservationFromMongo(stat, target.Shard)
 			if capacity.IndexSizes != nil {
@@ -370,8 +368,14 @@ func (c *Client) collectIndexAuditCollection(ctx context.Context, ref indexColle
 				}
 			}
 			observation.Building = stringIncluded(capacity.IndexBuilds, stat.Name)
-			result.Indexes = append(result.Indexes, observation)
+			item.indexes = append(item.indexes, observation)
 		}
+		return item
+	})
+	for _, item := range targetResults {
+		result.Indexes = append(result.Indexes, item.indexes...)
+		statuses = append(statuses, item.statuses...)
+		collectorErrors = append(collectorErrors, item.errors...)
 	}
 	result.Findings = evaluateIndexAuditCollection(result, len(targets), opts, now, ownershipKnown)
 	sort.SliceStable(result.Indexes, func(i, j int) bool {
@@ -384,6 +388,23 @@ func (c *Client) collectIndexAuditCollection(ctx context.Context, ref indexColle
 		return result.Indexes[i].Host < result.Indexes[j].Host
 	})
 	return result, statuses, collectorErrors
+}
+
+func collectIndexAuditTargets(ctx context.Context, targets []hotspotTarget, load indexAuditTargetLoader) []indexAuditTargetCollection {
+	if load == nil {
+		return []indexAuditTargetCollection{{errors: []error{invalidOptions("index audit target loader is required")}}}
+	}
+	result := make([]indexAuditTargetCollection, len(targets))
+	group, groupCtx := errgroup.WithContext(ctx)
+	for i := range targets {
+		i := i
+		group.Go(func() error {
+			result[i] = load(groupCtx, targets[i])
+			return nil
+		})
+	}
+	_ = group.Wait()
+	return result
 }
 
 func evaluateIndexAuditCollection(collection CollectionIndexAudit, expectedNodes int, opts IndexAuditOptions, now time.Time, ownershipKnown ...bool) []DiagnosticFinding {

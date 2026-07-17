@@ -1,6 +1,18 @@
 ## Unreleased
 <!-- 普通 issue 新增条目只写在本 Unreleased 段；不要写入下面已归档版本段。 -->
 
+### v2.2.1(20260717)
+#### feature:
+1. 新增请求级、并发安全的 CollectorSession，覆盖九个只读 capability，并提供生命周期管理和脱敏统计。
+#### optimization:
+1. 复用 topology、shard/replica-set/database/collection inventory 和派生成员连接，通过 singleflight 与全局有界并发收敛重复采集。
+2. 优化 Slowlog、IndexAudit、Capacity 等节点任务调度；6×18 分片集群实测 Session 中位耗时相对 Legacy 降低 72.5%–80.9%。
+#### bugFix:
+1. 将 -t/--target 明确为 host:port，并保留 --host 与 -P/--port 拆分入口，消除 target 与 host 的参数语义歧义。
+#### note:
+1. 现有 Client API、结果顺序、partial result 和 CLI 单命令生命周期保持兼容；BulkDelete/BulkUpdate 不进入 Session。
+2. MongoDB 3.4、4.2、7.0 的复制集和 6×18 分片集群共 36/36 次 live E2E 通过；接入方需在一次请求内复用同一 Session 才能获得多能力性能收益。
+
 ### v2.2.0(20260717)
 #### optimization:
 1. 统一项目内 Go import、Makefile 版本注入、SDK 示例和设计文档，并新增 module contract project-check 防止路径回退。

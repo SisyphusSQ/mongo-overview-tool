@@ -21,13 +21,23 @@ var rootCmd = &cobra.Command{
 func registerBaseFlags(cmd *cobra.Command, cfg *config.BaseCfg) {
 	cmd.Flags().BoolVar(&cfg.Debug, "debug", false, "If debug_mode is true, print debug logs")
 
-	cmd.Flags().StringVarP(&cfg.Host, "host", "t", "127.0.0.1", "Server to connect to")
+	cmd.Flags().StringVarP(&cfg.Target, "target", "t", "127.0.0.1:27017", "Server to connect to (host:port)")
+	cmd.Flags().StringVar(&cfg.Host, "host", "127.0.0.1", "Server to connect to")
 	cmd.Flags().IntVarP(&cfg.Port, "port", "P", 27017, "Port to connect to")
 	cmd.Flags().StringVarP(&cfg.Username, "username", "u", "", "Username for authentication")
 	cmd.Flags().StringVarP(&cfg.Password, "password", "p", "", "Password for authentication")
 	cmd.Flags().StringVar(&cfg.AuthSource, "authSource", "admin", "User source")
 
 	cmd.Flags().StringVar(&cfg.MongoUri, "uri", "", "Connection string URI(Example:mongodb://192.168.0.5:9999/foo)")
+
+	previousPreRunE := cmd.PreRunE
+	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+		cfg.TargetChanged = cmd.Flags().Changed("target")
+		if previousPreRunE != nil {
+			return previousPreRunE(cmd, args)
+		}
+		return nil
+	}
 }
 
 func initAll() {

@@ -6,12 +6,61 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	drivermongo "go.mongodb.org/mongo-driver/mongo"
 
 	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mongo"
 )
+
+func TestCollectSlowlogHostsRunsConcurrentlyAndPreservesOrder(t *testing.T) {
+	// 测试 slowlog 成员层并发调度节点，同时保持 replica status 中的稳定顺序。
+	members := []pkgmongo.RsMember{
+		{Name: "node-1", State: pkgmongo.StatePrimary},
+		{Name: "node-2", State: pkgmongo.StateSecondary},
+		{Name: "node-3", State: pkgmongo.StateSecondary},
+	}
+	var current atomic.Int64
+	var maximum atomic.Int64
+	hosts, _, _ := collectSlowlogHostsPartial(context.Background(), members, func(_ context.Context, member pkgmongo.RsMember) (HostSlowlogSummary, []CollectorStatus, []error) {
+		running := current.Add(1)
+		defer current.Add(-1)
+		updateMaximum(&maximum, running)
+		time.Sleep(10 * time.Millisecond)
+		return HostSlowlogSummary{Address: member.Name}, nil, nil
+	})
+	if maximum.Load() <= 1 {
+		t.Fatalf("maximum host concurrency = %d, want greater than 1", maximum.Load())
+	}
+	if len(hosts) != 3 || hosts[0].Address != "node-1" || hosts[1].Address != "node-2" || hosts[2].Address != "node-3" {
+		t.Fatalf("host order changed: %#v", hosts)
+	}
+}
+
+func TestCollectSlowlogShardsHonorsConcurrencyAndOrder(t *testing.T) {
+	// 场景：显式 session 并发采集多个 shard，同时保持最终 replica set 顺序稳定。
+	shards := []pkgmongo.Shard{{Id: "shard-1"}, {Id: "shard-2"}, {Id: "shard-3"}, {Id: "shard-4"}}
+	var current atomic.Int64
+	var maximum atomic.Int64
+
+	result := collectSlowlogShards(context.Background(), shards, 2, func(_ context.Context, shard pkgmongo.Shard) slowlogShardCollection {
+		running := current.Add(1)
+		defer current.Add(-1)
+		updateMaximum(&maximum, running)
+		time.Sleep(10 * time.Millisecond)
+		return slowlogShardCollection{replicaSet: ReplicaSetSlowlogSummary{Name: shard.Id}, include: true}
+	})
+	if maximum.Load() != 2 {
+		t.Fatalf("maximum concurrency = %d, want 2", maximum.Load())
+	}
+	for i, shard := range shards {
+		if !result[i].include || result[i].replicaSet.Name != shard.Id {
+			t.Fatalf("result order changed: %#v", result)
+		}
+	}
+}
 
 func TestConvertSlowlogViewPreservesPresenceAndAvoidsInvalidRatios(t *testing.T) {
 	// 场景：缺失、真实零和可计算 ratio 必须区分，JSON 不得出现 Infinity/NaN。
