@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/log"
@@ -19,9 +21,11 @@ var FilterDBs = []string{"admin", "config", "local"}
 type BaseCfg struct {
 	Debug bool
 
-	Host     string
-	Port     int
-	MongoUri string
+	Target        string
+	TargetChanged bool
+	Host          string
+	Port          int
+	MongoUri      string
 
 	Username   string
 	Password   string
@@ -64,13 +68,21 @@ type BulkConfig struct {
 
 var (
 	authFmt = "%s:%s@"
-	uriFmt  = "mongodb://%s%s:%d/%s"
+	uriFmt  = "mongodb://%s%s/%s"
 )
 
 func BasePreCheck(cfg *BaseCfg) error {
 	log.New(cfg.Debug)
 
 	if cfg.MongoUri == "" {
+		if cfg.TargetChanged {
+			host, port, err := splitTarget(cfg.Target)
+			if err != nil {
+				return err
+			}
+			cfg.Host = host
+			cfg.Port = port
+		}
 		if cfg.Host == "" || cfg.Port == 0 {
 			return fmt.Errorf("host and port must be set")
 		}
@@ -86,7 +98,8 @@ func BasePreCheck(cfg *BaseCfg) error {
 			cfg.Auth = ""
 		}
 
-		cfg.BuildUri = fmt.Sprintf(uriFmt, cfg.Auth, cfg.Host, cfg.Port, cfg.AuthSource)
+		endpoint := net.JoinHostPort(strings.Trim(cfg.Host, "[]"), strconv.Itoa(cfg.Port))
+		cfg.BuildUri = fmt.Sprintf(uriFmt, cfg.Auth, endpoint, cfg.AuthSource)
 	} else {
 		cfg.BuildUri = cfg.MongoUri
 
@@ -99,6 +112,21 @@ func BasePreCheck(cfg *BaseCfg) error {
 	}
 
 	return nil
+}
+
+func splitTarget(target string) (string, int, error) {
+	host, portText, err := net.SplitHostPort(strings.TrimSpace(target))
+	if err != nil {
+		return "", 0, fmt.Errorf("invalid target: expected host:port")
+	}
+	if host == "" {
+		return "", 0, fmt.Errorf("invalid target: host must be set")
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return "", 0, fmt.Errorf("invalid target: port must be within 1-65535")
+	}
+	return host, port, nil
 }
 
 func (c *BaseCfg) ConcatUri(addr string) string {

@@ -24,7 +24,7 @@ var bulkDeleteCmd = &cobra.Command{
 	Short: "Batch delete documents from a collection",
 	Long:  `Batch delete documents from a MongoDB collection with controlled batch size and pause intervals to minimize impact on production traffic.`,
 	Example: fmt.Sprintf(`  # JSON format
-  %s bulk-delete -t 10.0.0.1 -P 27017 -d mydb -c users -f '{"status":"inactive"}' -b 500 --pause-ms 200
+  %s bulk-delete -t 10.0.0.1:27017 -d mydb -c users -f '{"status":"inactive"}' -b 500 --pause-ms 200
   # Shell syntax (unquoted keys, ISODate, ObjectId, etc.)
   %s bulk-delete --uri "mongodb://user:pass@host:27017" -d mydb -c users -f '{hitCreateTime: {$lt: ISODate("2024-01-01T00:00:00Z")}}' --dry-run`,
 		vars.AppName, vars.AppName),
@@ -38,7 +38,7 @@ var bulkUpdateCmd = &cobra.Command{
 	Short: "Batch update documents in a collection",
 	Long:  `Batch update documents in a MongoDB collection with controlled batch size and pause intervals to minimize impact on production traffic.`,
 	Example: fmt.Sprintf(`  # JSON format
-  %s bulk-update -t 10.0.0.1 -P 27017 -d mydb -c orders -f '{"status":"pending"}' --update '{"$set":{"status":"archived"}}' -b 1000 --pause-ms 100
+  %s bulk-update -t 10.0.0.1:27017 -d mydb -c orders -f '{"status":"pending"}' --update '{"$set":{"status":"archived"}}' -b 1000 --pause-ms 100
   # Shell syntax (unquoted keys, ISODate, single quotes, etc.)
   %s bulk-update --uri "mongodb://user:pass@host:27017" -d mydb -c orders -f '{status: "pending"}' --update '{$set: {status: "archived"}}' --dry-run -o bulk.log`,
 		vars.AppName, vars.AppName),

@@ -199,8 +199,11 @@ go test -tags=integration -count=1 -v \
 ### 1. 命令行参数（推荐）
 
 ```bash
-# 使用 host/port
-mot overview -t 127.0.0.1 -P 27017 -u root -p password --authSource admin
+# 使用完整 target（推荐）
+mot overview -t 127.0.0.1:27017 -u root -p password --authSource admin
+
+# 分别指定 host/port
+mot overview --host 127.0.0.1 -P 27017 -u root -p password --authSource admin
 
 # 使用 URI
 mot overview --uri "mongodb://root:password@127.0.0.1:27017/admin"
@@ -213,7 +216,7 @@ mot overview --uri "mongodb://root:password@127.0.0.1:27017/admin"
 ```bash
 export MONGO_USER=root
 export MONGO_PASS=password
-mot overview -t 127.0.0.1 -P 27017
+mot overview -t 127.0.0.1:27017
 ```
 
 ### 通用参数
@@ -223,7 +226,8 @@ mot overview -t 127.0.0.1 -P 27017
 | 参数 | 简写 | 描述 | 默认值 |
 | :--- | :--- | :--- | :--- |
 | `--uri` | | MongoDB 连接 URI (覆盖其他连接参数) | "" |
-| `--host` | `-t` | 目标主机 IP | 127.0.0.1 |
+| `--target` | `-t` | 完整目标地址（host:port） | 127.0.0.1:27017 |
+| `--host` | | 目标主机 IP | 127.0.0.1 |
 | `--port` | `-P` | 目标端口 | 27017 |
 | `--username` | `-u` | 认证用户名 | "" |
 | `--password` | `-p` | 认证密码 | "" |
@@ -428,7 +432,7 @@ mot bulk-delete -d mydb -c users \
 mot bulk-delete -d mydb -c users -f '{"status":"inactive"}' --dry-run
 
 # 执行删除：删除 mydb.users 中 status=inactive 的文档，每批 500 条，每批间隔 200ms
-mot bulk-delete -t 10.0.0.1 -P 27017 \
+mot bulk-delete -t 10.0.0.1:27017 \
   -d mydb -c users \
   -f '{"status":"inactive"}' \
   -b 500 --pause-ms 200
