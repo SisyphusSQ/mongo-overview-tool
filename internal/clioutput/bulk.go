@@ -10,9 +10,9 @@ import (
 
 	"github.com/fatih/color"
 
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/progress"
-	"github.com/SisyphusSQ/mongo-overview-tool/utils/timeutil"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/progress"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/utils/timeutil"
 )
 
 type BulkObserverOptions struct {

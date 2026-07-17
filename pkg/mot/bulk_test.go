@@ -9,7 +9,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 
-	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/pkg/mongo"
+	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mongo"
 )
 
 type fakeBulkCursor struct {

@@ -1,8 +1,8 @@
-.PHONY: all release release-clean release-assets release-archives release-checksums release-verify require-release-version require-release-tools build linux test test_x86 darwin deploy run clean harness-check harness-verify harness-review-gate
+.PHONY: all release release-clean release-assets release-archives release-checksums release-verify require-release-version require-release-tools build linux test test_x86 darwin deploy run clean project-check harness-check harness-verify harness-review-gate
 
 VERSION ?= dev
 
-VARS_PKG = github.com/SisyphusSQ/mongo-overview-tool/vars
+VARS_PKG = github.com/SisyphusSQ/mongo-overview-tool/v2/vars
 
 BUILD_FLAGS  = -X '${VARS_PKG}.AppName=mot'
 BUILD_FLAGS += -X '${VARS_PKG}.AppVersion=${VERSION}'
@@ -236,10 +236,13 @@ clean:
 	@rm -f bin/mot $(RELEASE_BINARIES)
 	@rm -rf bin/release
 
+project-check:
+	bash scripts/project-checks/check.sh
+
 harness-check:
 	bash scripts/harness/check.sh
 
-harness-verify: harness-check
+harness-verify: harness-check project-check
 
 harness-review-gate:
 	@if [ -z "$(PLAN)" ]; then echo "usage: make harness-review-gate PLAN=path/to/plan.md" >&2; exit 2; fi

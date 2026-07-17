@@ -8,8 +8,8 @@ import (
 	"github.com/fatih/color"
 	"go.mongodb.org/mongo-driver/bson"
 
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
-	"github.com/SisyphusSQ/mongo-overview-tool/utils/timeutil"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/utils/timeutil"
 )
 
 type SlowlogPrintOptions struct {

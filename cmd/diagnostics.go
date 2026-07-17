@@ -14,9 +14,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/SisyphusSQ/mongo-overview-tool/internal/clioutput"
-	"github.com/SisyphusSQ/mongo-overview-tool/internal/config"
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/internal/clioutput"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/internal/config"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot"
 )
 
 type diagnosticBaseConfig struct {

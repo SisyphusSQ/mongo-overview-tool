@@ -6,7 +6,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/SisyphusSQ/mongo-overview-tool/vars"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/vars"
 )
 
 var versionCmd = &cobra.Command{

@@ -10,7 +10,7 @@ import (
 
 	"github.com/fatih/color"
 
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot"
 )
 
 var updateGolden = flag.Bool("update", false, "update golden files")

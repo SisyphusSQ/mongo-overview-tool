@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SisyphusSQ/mongo-overview-tool/internal/config"
-	l "github.com/SisyphusSQ/mongo-overview-tool/pkg/log"
-	"github.com/SisyphusSQ/mongo-overview-tool/pkg/mot"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/internal/config"
+	l "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/log"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot"
 )
 
 const sdkClientCloseTimeout = 5 * time.Second

@@ -4,7 +4,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/SisyphusSQ/mongo-overview-tool/utils/timeutil"
+	"github.com/SisyphusSQ/mongo-overview-tool/v2/utils/timeutil"
 )
 
 var Logger *ZapLogger
