@@ -184,7 +184,7 @@ MOT_TEST_MONGO_URI='mongodb://user:pass@127.0.0.1:27017/admin' \
   go test -tags=integration ./pkg/mongo ./pkg/mot
 ```
 
-SDK 只读 live E2E 使用独立的 host/port 环境变量，并从现有 `MONGO_USER` / `MONGO_PASS` 读取认证信息；测试覆盖 Overview、CollectionStats、SlowlogSummary 和 SlowlogDetail，不执行 bulk-delete / bulk-update：
+SDK 只读 live E2E 使用独立的 host/port 环境变量，并从现有 `MONGO_USER` / `MONGO_PASS` 读取认证信息；测试覆盖全部九个只读 capability，不执行 bulk-delete / bulk-update：
 
 ```bash
 MOT_TEST_MONGO_HOST='<host>' \
@@ -195,6 +195,25 @@ go test -tags=integration -count=1 -v \
 ```
 
 `Legacy` 和 `Session` 使用相同 scope、权限和 capability 参数；做性能验收时应按 Legacy → Session → Session → Legacy → Legacy → Session 的顺序分别运行并比较三次中位数。该 live E2E 还覆盖 `Doctor`、`CurrentOperations`、`Hotspot`、通用 `IndexAudit`、`Capacity` 和增强后的 slowlog insight。分片集合索引一致性使用独立的 `TestLiveIndexConsistencyReadOnlyE2E` 和预置 namespace 环境变量。测试会读取真实 routing metadata、shard 索引定义和诊断统计，但不会创建数据、修改 Profiler、变更索引或执行维护命令。
+
+### CollectorSession Live E2E 结果（2026-07-17）
+
+本次使用相同账号、scope 和 capability 参数，在 MongoDB 3.4、4.2、7.0 的复制集和 6 replica set / 18 节点分片集群中完成交替实测。六个目标共 36 次 Legacy / Session 矩阵全部通过，另有一次 Session smoke 通过：
+
+| MongoDB | 拓扑 | Legacy 中位耗时 | Session 中位耗时 | 降幅 |
+| --- | --- | ---: | ---: | ---: |
+| 3.4 | 复制集 | 9.892 秒 | 3.164 秒 | 68.0% |
+| 3.4 | 6×18 分片集群 | 55.981 秒 | 10.694 秒 | 80.9% |
+| 4.2 | 复制集 | 7.983 秒 | 2.712 秒 | 66.0% |
+| 4.2 | 6×18 分片集群 | 60.560 秒 | 16.641 秒 | 72.5% |
+| 7.0 | 复制集 | 10.367 秒 | 3.811 秒 | 63.2% |
+| 7.0 | 6×18 分片集群 | 73.306 秒 | 15.306 秒 | 79.1% |
+
+三个分片环境的 Session 中位耗时均低于 45 秒，且相对 Legacy 的降幅均超过 35%。每次分片 Session 都只加载一次 topology 和一次 shard inventory，派生连接数为 24，远程采集峰值并发为 4。MongoDB 3.4、4.2、7.0 的显式 Session 索引一致性检查也全部通过，分别命中 `direct_list_indexes`、`index_stats`、`check_metadata_consistency` 三条版本策略，结果均为 complete、consistent 且未触发 fallback。
+
+本轮同时验证了 `-t/--target host:port` 在三个分片版本上的连接行为，以及 `--host` 配合 `-P/--port` 的兼容入口。完整测试、race、vet、harness、构建、integration build-only 和 benchmark 均通过；测试过程没有执行 Bulk、数据或索引写入，也没有记录集群地址、业务 namespace 或认证信息。
+
+结论：请求级 `CollectorSession` 优化已达到当前 SDK 上线门槛。接入方需要在一次上层请求内创建并复用同一个 session，才能获得上述拓扑、连接和并发调度收益；单能力 `Client` 调用和 CLI 行为继续保持兼容。DBBridge 及其他接入方的适配不包含在当前 SDK 分支中。
 
 ### 1. 命令行参数（推荐）
 
