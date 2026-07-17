@@ -93,7 +93,7 @@ Expand-Archive -Path .\mot.windows.amd64.zip -DestinationPath .\mot
 在已有 Go module 中，先在代码中导入下方的 `pkg/mot`，再添加依赖并整理 module：
 
 ```bash
-go get github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot@v2.2.0
+go get github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot@v2.2.1
 go mod tidy
 ```
 
@@ -119,7 +119,7 @@ func main() {
 再添加依赖、整理 module 并运行：
 
 ```bash
-go get github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot@v2.2.0
+go get github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mot@v2.2.1
 go mod tidy
 go run .
 ```
