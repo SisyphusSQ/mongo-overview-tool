@@ -16,11 +16,16 @@ type clientIndexConsistencySource struct {
 }
 
 func (s clientIndexConsistencySource) ServerVersion(ctx context.Context) (string, error) {
+	release, err := s.client.acquireRemoteSlot(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	return s.client.conn.ServerVersion(ctx)
 }
 
 func (s clientIndexConsistencySource) Shards(ctx context.Context) (map[string]indexShardTarget, error) {
-	shards, err := s.client.conn.ListShards(ctx)
+	shards, err := s.client.listShards(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list shards: %w", err)
 	}
@@ -36,10 +41,20 @@ func (s clientIndexConsistencySource) Shards(ctx context.Context) (map[string]in
 }
 
 func (s clientIndexConsistencySource) Routing(ctx context.Context, ref indexCollectionRef) (pkgmongo.IndexRoutingSnapshot, error) {
+	release, err := s.client.acquireRemoteSlot(ctx)
+	if err != nil {
+		return pkgmongo.IndexRoutingSnapshot{}, err
+	}
+	defer release()
 	return s.client.conn.IndexRouting(ctx, ref.Database, ref.Collection, indexConsistencyCollectorTimeout)
 }
 
 func (s clientIndexConsistencySource) Visibility(ctx context.Context, ref indexCollectionRef) (indexCollectionVisibility, error) {
+	release, err := s.client.acquireRemoteSlot(ctx)
+	if err != nil {
+		return indexCollectionVisibility{}, err
+	}
+	defer release()
 	snapshot, err := s.client.conn.CollectionCapacity(ctx, ref.Database, ref.Collection, false, indexConsistencyCollectorTimeout)
 	if err != nil {
 		return indexCollectionVisibility{}, err
@@ -56,16 +71,31 @@ func (s clientIndexConsistencySource) Visibility(ctx context.Context, ref indexC
 }
 
 func (s clientIndexConsistencySource) Metadata(ctx context.Context, database, collection string) ([]pkgmongo.MetadataIndexInconsistency, error) {
+	release, err := s.client.acquireRemoteSlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	return s.client.conn.CheckMetadataIndexConsistency(ctx, pkgmongo.MetadataConsistencyRequest{
 		Database: database, Collection: collection, BatchSize: 100, MaxTime: indexConsistencyCollectorTimeout,
 	})
 }
 
 func (s clientIndexConsistencySource) Stats(ctx context.Context, ref indexCollectionRef) ([]pkgmongo.CanonicalIndexDefinition, error) {
+	release, err := s.client.acquireRemoteSlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	return s.client.conn.IndexConsistencyStats(ctx, ref.Database, ref.Collection, indexConsistencyCollectorTimeout)
 }
 
 func (s clientIndexConsistencySource) Direct(ctx context.Context, ref indexCollectionRef, target indexShardTarget) ([]pkgmongo.CanonicalIndexDefinition, error) {
+	release, err := s.client.acquireRemoteSlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	conn, err := s.client.connectAddress(ctx, target.Addresses, derivedConnectionOptions{
 		ReplicaSet: target.ReplicaSet, Direct: boolPointer(false),
 	})

@@ -7,12 +7,13 @@ import (
 )
 
 var (
-	ErrInvalidOptions      = errors.New("invalid options")
-	ErrUnsupportedTopology = errors.New("unsupported topology")
-	ErrNotSharded          = errors.New("not sharded")
-	ErrDangerousOperation  = errors.New("dangerous operation")
-	ErrCancelled           = errors.New("operation cancelled")
-	ErrPartialResult       = errors.New("partial result")
+	ErrInvalidOptions         = errors.New("invalid options")
+	ErrUnsupportedTopology    = errors.New("unsupported topology")
+	ErrNotSharded             = errors.New("not sharded")
+	ErrDangerousOperation     = errors.New("dangerous operation")
+	ErrCancelled              = errors.New("operation cancelled")
+	ErrPartialResult          = errors.New("partial result")
+	ErrCollectorSessionClosed = errors.New("collector session is closed")
 )
 
 // PartialError 表示操作失败时已经产生了可读取的部分结果。

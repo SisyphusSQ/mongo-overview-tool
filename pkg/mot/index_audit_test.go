@@ -1,12 +1,37 @@
 package mot
 
 import (
+	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mongo"
 )
+
+func TestCollectIndexAuditTargetsRunsConcurrentlyAndPreservesOrder(t *testing.T) {
+	// 场景：同一 namespace 的节点任务并发执行，聚合顺序仍与稳定 target 清单一致。
+	targets := []hotspotTarget{{Address: "node-1"}, {Address: "node-2"}, {Address: "node-3"}}
+	var current atomic.Int64
+	var maximum atomic.Int64
+
+	result := collectIndexAuditTargets(context.Background(), targets, func(_ context.Context, target hotspotTarget) indexAuditTargetCollection {
+		running := current.Add(1)
+		defer current.Add(-1)
+		updateMaximum(&maximum, running)
+		time.Sleep(10 * time.Millisecond)
+		return indexAuditTargetCollection{indexes: []IndexObservation{{Host: target.Address}}}
+	})
+	if maximum.Load() <= 1 {
+		t.Fatalf("maximum concurrency = %d, want greater than 1", maximum.Load())
+	}
+	for i, target := range targets {
+		if len(result[i].indexes) != 1 || result[i].indexes[0].Host != target.Address {
+			t.Fatalf("result order changed: %#v", result)
+		}
+	}
+}
 
 func TestValidateIndexConsistencyTopologyRequiresMongosOnlyWhenRequested(t *testing.T) {
 	// 场景：默认 consistency 在副本集入口必须整体拒绝；显式通用 checks 保持既有副本集能力。

@@ -55,8 +55,22 @@ type doctorNodeSnapshot struct {
 	EvictionPressure optionalInt64
 }
 
+type doctorShardCollection struct {
+	findings   []DiagnosticFinding
+	statuses   []CollectorStatus
+	errors     []error
+	successful bool
+}
+
+type doctorShardLoader func(ctx context.Context, shard pkgmongo.Shard) doctorShardCollection
+
 // Doctor 执行一次只读、有界的 MongoDB 健康巡检。
 func (c *Client) Doctor(ctx context.Context, opts DoctorOptions) (result *DoctorResult, err error) {
+	if c != nil && c.session == nil {
+		return withEphemeralCollectorSession(ctx, c, func(session *CollectorSession) (*DoctorResult, error) {
+			return session.Doctor(ctx, opts)
+		})
+	}
 	opts, err = normalizeDoctorOptions(opts)
 	if err != nil {
 		return nil, err
@@ -69,7 +83,7 @@ func (c *Client) Doctor(ctx context.Context, opts DoctorOptions) (result *Doctor
 	}
 	defer func() { err = mapContextError(err) }()
 
-	cluster, err := pkgmongo.DetectCluster(ctx, c.conn)
+	cluster, err := c.detectCluster(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -80,46 +94,67 @@ func (c *Client) Doctor(ctx context.Context, opts DoctorOptions) (result *Doctor
 	}
 	var collectorErrors []error
 	successfulReplicaSets := 0
+	nodeLimit := semaphore.NewWeighted(int64(opts.NodeConcurrency))
 
-	collect := func(conn *pkgmongo.Conn, shard string) {
-		findings, statuses, collectErr := c.collectDoctorReplicaSet(ctx, conn, shard, opts, result.CollectedAt)
-		result.Findings = append(result.Findings, findings...)
-		result.CollectorStatuses = append(result.CollectorStatuses, statuses...)
+	collect := func(conn *pkgmongo.Conn, shard, inventoryKey string) doctorShardCollection {
+		findings, statuses, collectErr := c.collectDoctorReplicaSet(ctx, conn, shard, inventoryKey, opts, result.CollectedAt, nodeLimit)
+		item := doctorShardCollection{findings: findings, statuses: statuses, successful: collectErr == nil}
 		if collectErr != nil {
-			collectorErrors = append(collectorErrors, collectErr)
-			return
+			item.errors = append(item.errors, collectErr)
 		}
-		successfulReplicaSets++
+		return item
+	}
+	merge := func(item doctorShardCollection) {
+		result.Findings = append(result.Findings, item.findings...)
+		result.CollectorStatuses = append(result.CollectorStatuses, item.statuses...)
+		collectorErrors = append(collectorErrors, item.errors...)
+		if item.successful {
+			successfulReplicaSets++
+		}
 	}
 
 	switch cluster.Type {
 	case pkgmongo.ClusterRepl:
-		collect(c.conn, "")
+		merge(collect(c.conn, "", "base"))
 	case pkgmongo.ClusterShard:
-		shards, listErr := c.conn.ListShards(ctx)
+		shards, listErr := c.listShards(ctx)
 		if listErr != nil {
 			return nil, fmt.Errorf("list shards: %w", listErr)
+		}
+		loadShard := func(ctx context.Context, shard pkgmongo.Shard) doctorShardCollection {
+			if cancelErr := contextError(ctx); cancelErr != nil {
+				return doctorShardCollection{errors: []error{cancelErr}}
+			}
+			replicaSet, addresses, parseErr := parseShardHost(shard.Host)
+			scope := FindingScope{Type: ScopeReplicaSet, ReplicaSet: replicaSet, Shard: shard.Id}
+			if parseErr != nil {
+				return doctorShardCollection{
+					statuses: []CollectorStatus{failedCollectorStatus("replica_status", scope, parseErr)},
+					errors:   []error{parseErr},
+				}
+			}
+			conn, connectErr := c.connectAddress(ctx, addresses, derivedConnectionOptions{ReplicaSet: replicaSet, Direct: boolPointer(false)})
+			if connectErr != nil {
+				return doctorShardCollection{
+					statuses: []CollectorStatus{failedCollectorStatus("replica_status", scope, connectErr)},
+					errors:   []error{connectErr},
+				}
+			}
+			defer c.closeDerivedConnection(ctx, conn)
+			return collect(conn, shard.Id, replicaSet)
+		}
+		if c.session != nil && !c.session.legacy {
+			for _, item := range collectDoctorShards(ctx, shards.Shards, c.session.maxConcurrency, loadShard) {
+				merge(item)
+			}
+			break
 		}
 		for _, shard := range shards.Shards {
 			if cancelErr := contextError(ctx); cancelErr != nil {
 				collectorErrors = append(collectorErrors, cancelErr)
 				break
 			}
-			replicaSet, addresses, parseErr := parseShardHost(shard.Host)
-			scope := FindingScope{Type: ScopeReplicaSet, ReplicaSet: replicaSet, Shard: shard.Id}
-			if parseErr != nil {
-				collectorErrors = append(collectorErrors, parseErr)
-				result.CollectorStatuses = append(result.CollectorStatuses, failedCollectorStatus("replica_status", scope, parseErr))
-				continue
-			}
-			conn, connectErr := c.connectAddress(ctx, addresses, derivedConnectionOptions{ReplicaSet: replicaSet, Direct: boolPointer(false)})
-			if connectErr != nil {
-				collectorErrors = append(collectorErrors, connectErr)
-				result.CollectorStatuses = append(result.CollectorStatuses, failedCollectorStatus("replica_status", scope, connectErr))
-				continue
-			}
-			collect(conn, shard.Id)
-			c.closeDerivedConnection(ctx, conn)
+			merge(loadShard(ctx, shard))
 		}
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedTopology, cluster.Type)
@@ -139,14 +174,43 @@ func (c *Client) Doctor(ctx context.Context, opts DoctorOptions) (result *Doctor
 	return result, newDiagnosticPartialError("doctor", result, joined)
 }
 
+func collectDoctorShards(ctx context.Context, shards []pkgmongo.Shard, concurrency int, load doctorShardLoader) []doctorShardCollection {
+	if load == nil {
+		return []doctorShardCollection{{errors: []error{invalidOptions("doctor shard loader is required")}}}
+	}
+	if concurrency <= 0 {
+		concurrency = defaultCollectorSessionConcurrency
+	}
+
+	result := make([]doctorShardCollection, len(shards))
+	group := new(errgroup.Group)
+	group.SetLimit(concurrency)
+	for i := range shards {
+		i := i
+		group.Go(func() error {
+			result[i] = load(ctx, shards[i])
+			return nil
+		})
+	}
+	_ = group.Wait()
+	return result
+}
+
 func (c *Client) collectDoctorReplicaSet(
 	ctx context.Context,
 	conn *pkgmongo.Conn,
 	shard string,
+	inventoryKey string,
 	opts DoctorOptions,
 	now time.Time,
+	nodeLimit *semaphore.Weighted,
 ) ([]DiagnosticFinding, []CollectorStatus, error) {
+	release, err := c.acquireRemoteSlot(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	status, err := conn.RsStatus(ctx)
+	release()
 	scope := FindingScope{Type: ScopeReplicaSet, Shard: shard}
 	if err != nil {
 		collectorStatus := failedCollectorStatus("replica_status", scope, err)
@@ -155,6 +219,7 @@ func (c *Client) collectDoctorReplicaSet(
 		}
 		return nil, []CollectorStatus{collectorStatus}, err
 	}
+	c.rememberReplicaSetInventory(inventoryKey, status)
 	scope.ReplicaSet = status.Set
 	statuses := []CollectorStatus{{Name: "replica_status", State: CapabilitySupported, Scope: scope}}
 	nodes := make([]doctorNodeSnapshot, 0, len(status.Members))
@@ -175,6 +240,14 @@ func (c *Client) collectDoctorReplicaSet(
 		member := member
 		group.Go(func() error {
 			defer limit.Release(1)
+			release, acquireErr := c.acquireCapabilityRemoteSlot(groupCtx, nodeLimit)
+			if acquireErr != nil {
+				mu.Lock()
+				collectorErrors = append(collectorErrors, acquireErr)
+				mu.Unlock()
+				return nil
+			}
+			defer release()
 			nodeScope := FindingScope{Type: ScopeNode, ReplicaSet: status.Set, Shard: shard, Node: member.Name}
 			nodeConn, connectErr := c.connectAddress(groupCtx, member.Name, derivedConnectionOptions{Direct: boolPointer(true)})
 			if connectErr != nil {
@@ -209,12 +282,18 @@ func (c *Client) collectDoctorReplicaSet(
 		collectorErrors = append(collectorErrors, cancelErr)
 		return findings, statuses, errors.Join(collectorErrors...)
 	}
-	diskFindings, diskStatuses, diskErrors := c.collectDoctorDisk(ctx, conn, shard, status.Set, opts.IncludeSystemDB)
+	diskFindings, diskStatuses, diskErrors := c.collectDoctorDisk(ctx, conn, shard, status.Set, inventoryKey, opts.IncludeSystemDB)
 	findings = append(findings, diskFindings...)
 	statuses = append(statuses, diskStatuses...)
 	collectorErrors = append(collectorErrors, diskErrors...)
 	if opts.IncludeOplogWindow {
+		release, acquireErr := c.acquireRemoteSlot(ctx)
+		if acquireErr != nil {
+			collectorErrors = append(collectorErrors, acquireErr)
+			return findings, statuses, errors.Join(collectorErrors...)
+		}
 		oplog, oplogErr := conn.OplogWindow(ctx, 5*time.Second)
+		release()
 		switch {
 		case oplogErr == nil:
 			statuses = append(statuses, CollectorStatus{Name: "oplog_window", State: CapabilitySupported, Scope: scope})
@@ -282,9 +361,10 @@ func (c *Client) collectDoctorDisk(
 	conn *pkgmongo.Conn,
 	shard string,
 	replicaSet string,
+	inventoryKey string,
 	includeSystemDB bool,
 ) ([]DiagnosticFinding, []CollectorStatus, []error) {
-	dbs, err := conn.Client.ListDatabaseNames(ctx, map[string]any{})
+	dbs, err := c.replicaSetDatabaseNames(ctx, conn, inventoryKey)
 	if err != nil {
 		scope := FindingScope{Type: ScopeReplicaSet, ReplicaSet: replicaSet, Shard: shard}
 		if isUnauthorizedError(err) {
@@ -302,7 +382,13 @@ func (c *Client) collectDoctorDisk(
 			continue
 		}
 		scope := FindingScope{Type: ScopeDatabase, ReplicaSet: replicaSet, Shard: shard, Database: db}
+		release, acquireErr := c.acquireRemoteSlot(ctx)
+		if acquireErr != nil {
+			collectorErrors = append(collectorErrors, acquireErr)
+			break
+		}
 		stats, statsErr := conn.DBStatus(ctx, db)
+		release()
 		if statsErr != nil {
 			statuses = append(statuses, failedCollectorStatus("database_stats", scope, statsErr))
 			if !isUnauthorizedError(statsErr) && !isUnsupportedDiagnosticError(statsErr) {

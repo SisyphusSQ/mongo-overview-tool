@@ -3,11 +3,35 @@ package mot
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	pkgmongo "github.com/SisyphusSQ/mongo-overview-tool/v2/pkg/mongo"
 )
+
+func TestCollectDoctorShardsHonorsConcurrencyAndOrder(t *testing.T) {
+	// 场景：显式 session 并发采集多个 shard，但聚合仍保持 shard 清单顺序。
+	shards := []pkgmongo.Shard{{Id: "shard-1"}, {Id: "shard-2"}, {Id: "shard-3"}, {Id: "shard-4"}}
+	var current atomic.Int64
+	var maximum atomic.Int64
+
+	result := collectDoctorShards(context.Background(), shards, 2, func(_ context.Context, shard pkgmongo.Shard) doctorShardCollection {
+		running := current.Add(1)
+		defer current.Add(-1)
+		updateMaximum(&maximum, running)
+		time.Sleep(10 * time.Millisecond)
+		return doctorShardCollection{statuses: []CollectorStatus{{Name: shard.Id}}, successful: true}
+	})
+	if maximum.Load() != 2 {
+		t.Fatalf("maximum concurrency = %d, want 2", maximum.Load())
+	}
+	for i, shard := range shards {
+		if len(result[i].statuses) != 1 || result[i].statuses[0].Name != shard.Id {
+			t.Fatalf("result order changed: %#v", result)
+		}
+	}
+}
 
 func TestDoctorValidatesOptionsBeforeConnecting(t *testing.T) {
 	// 场景：非法阈值必须在任何 MongoDB 调用前返回 ErrInvalidOptions。

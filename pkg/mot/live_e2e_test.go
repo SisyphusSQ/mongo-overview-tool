@@ -21,7 +21,27 @@ import (
 
 const liveE2ETimeout = 3 * time.Minute
 
-func TestLiveSDKReadOnlyE2E(t *testing.T) {
+type liveReadOnlyCollector interface {
+	Overview(context.Context, OverviewOptions) (*OverviewResult, error)
+	CollectionStats(context.Context, CollectionStatsOptions) (*CollectionStatsResult, error)
+	Doctor(context.Context, DoctorOptions) (*DoctorResult, error)
+	CurrentOperations(context.Context, CurrentOperationsOptions) (*CurrentOperationsResult, error)
+	Hotspot(context.Context, HotspotOptions) (*HotspotResult, error)
+	IndexAudit(context.Context, IndexAuditOptions) (*IndexAuditResult, error)
+	Capacity(context.Context, CapacityOptions) (*CapacityResult, error)
+	SlowlogSummary(context.Context, SlowlogOptions) (*SlowlogSummaryResult, error)
+	SlowlogDetail(context.Context, string, string) (*SlowlogDetailResult, error)
+}
+
+func TestLiveSDKReadOnlyE2ELegacy(t *testing.T) {
+	runLiveSDKReadOnlyE2E(t, false)
+}
+
+func TestLiveSDKReadOnlyE2ESession(t *testing.T) {
+	runLiveSDKReadOnlyE2E(t, true)
+}
+
+func runLiveSDKReadOnlyE2E(t *testing.T, sessionMode bool) {
 	// 测试真实复制集或分片集群上的全部 SDK 只读主路径，不执行 bulk 写入。
 	host := requireLiveEnv(t, "MOT_TEST_MONGO_HOST")
 	username := requireLiveEnv(t, "MONGO_USER")
@@ -61,8 +81,25 @@ func TestLiveSDKReadOnlyE2E(t *testing.T) {
 			t.Errorf("Close failed: %v", err)
 		}
 	}()
+	var collector liveReadOnlyCollector = client
+	var session *CollectorSession
+	if sessionMode {
+		session, err = client.NewCollectorSession(CollectorSessionOptions{MaxConcurrency: 4})
+		if err != nil {
+			t.Fatalf("NewCollectorSession failed: %v", err)
+		}
+		collector = session
+		defer func() {
+			closeCtx, closeCancel := context.WithTimeout(context.Background(), cleanupTimeout)
+			defer closeCancel()
+			if err := session.Close(closeCtx); err != nil {
+				t.Errorf("CollectorSession.Close failed: %v", err)
+			}
+		}()
+	}
+	startedAt := time.Now()
 
-	overview, err := client.Overview(ctx, OverviewOptions{
+	overview, err := collector.Overview(ctx, OverviewOptions{
 		IncludeHosts:    true,
 		NodeConcurrency: 2,
 	})
@@ -86,7 +123,7 @@ func TestLiveSDKReadOnlyE2E(t *testing.T) {
 	if expectedCluster == ClusterSharded {
 		statsOpts.RequireShardedCluster = true
 	}
-	stats, err := client.CollectionStats(ctx, statsOpts)
+	stats, err := collector.CollectionStats(ctx, statsOpts)
 	if err != nil {
 		t.Fatalf("CollectionStats failed: %v", err)
 	}
@@ -94,7 +131,7 @@ func TestLiveSDKReadOnlyE2E(t *testing.T) {
 		t.Fatalf("CollectionStats returned no collection")
 	}
 
-	doctor, doctorErr := client.Doctor(ctx, DoctorOptions{NodeConcurrency: 2})
+	doctor, doctorErr := collector.Doctor(ctx, DoctorOptions{NodeConcurrency: 2})
 	if doctorErr != nil && !errors.Is(doctorErr, ErrPartialResult) {
 		t.Fatalf("Doctor failed: %v", doctorErr)
 	}
@@ -102,7 +139,7 @@ func TestLiveSDKReadOnlyE2E(t *testing.T) {
 		t.Fatalf("Doctor returned no collector status")
 	}
 
-	operations, operationsErr := client.CurrentOperations(ctx, CurrentOperationsOptions{AllUsers: true, Limit: 20, MaxTime: 5 * time.Second})
+	operations, operationsErr := collector.CurrentOperations(ctx, CurrentOperationsOptions{AllUsers: true, Limit: 20, MaxTime: 5 * time.Second})
 	if operationsErr != nil && !errors.Is(operationsErr, ErrPartialResult) {
 		t.Fatalf("CurrentOperations failed: %v", operationsErr)
 	}
@@ -110,7 +147,7 @@ func TestLiveSDKReadOnlyE2E(t *testing.T) {
 		t.Fatalf("CurrentOperations returned no collector status")
 	}
 
-	hotspot, hotspotErr := client.Hotspot(ctx, HotspotOptions{Duration: 100 * time.Millisecond, TopN: 5, NodeConcurrency: 2, Databases: []string{database}})
+	hotspot, hotspotErr := collector.Hotspot(ctx, HotspotOptions{Duration: 100 * time.Millisecond, TopN: 5, NodeConcurrency: 2, Databases: []string{database}})
 	if hotspotErr != nil && !errors.Is(hotspotErr, ErrPartialResult) {
 		t.Fatalf("Hotspot failed: %v", hotspotErr)
 	}
@@ -118,7 +155,7 @@ func TestLiveSDKReadOnlyE2E(t *testing.T) {
 		t.Fatalf("Hotspot returned no comparable sampling window")
 	}
 
-	indexAudit, indexAuditErr := client.IndexAudit(ctx, IndexAuditOptions{Databases: []string{database}, Collections: []string{collection}, Checks: []IndexAuditCheck{IndexCheckUnused, IndexCheckRedundant, IndexCheckSpace, IndexCheckBuilding}, MinObservation: time.Hour, MaxCollections: 1, Concurrency: 1})
+	indexAudit, indexAuditErr := collector.IndexAudit(ctx, IndexAuditOptions{Databases: []string{database}, Collections: []string{collection}, Checks: []IndexAuditCheck{IndexCheckUnused, IndexCheckRedundant, IndexCheckSpace, IndexCheckBuilding}, MinObservation: time.Hour, MaxCollections: 1, Concurrency: 1})
 	if indexAuditErr != nil && !errors.Is(indexAuditErr, ErrPartialResult) {
 		t.Fatalf("IndexAudit failed: %v", indexAuditErr)
 	}
@@ -126,7 +163,7 @@ func TestLiveSDKReadOnlyE2E(t *testing.T) {
 		t.Fatalf("IndexAudit returned no selected collection")
 	}
 
-	capacity, capacityErr := client.Capacity(ctx, CapacityOptions{Databases: []string{database}, Collections: []string{collection}, MaxCollections: 1, Concurrency: 1})
+	capacity, capacityErr := collector.Capacity(ctx, CapacityOptions{Databases: []string{database}, Collections: []string{collection}, MaxCollections: 1, Concurrency: 1})
 	if capacityErr != nil && !errors.Is(capacityErr, ErrPartialResult) {
 		t.Fatalf("Capacity failed: %v", capacityErr)
 	}
@@ -135,7 +172,7 @@ func TestLiveSDKReadOnlyE2E(t *testing.T) {
 	}
 
 	if expectedCluster == ClusterReplicaSet {
-		_, err := client.CollectionStats(ctx, CollectionStatsOptions{
+		_, err := collector.CollectionStats(ctx, CollectionStatsOptions{
 			Databases:             []string{database},
 			Collections:           []string{collection},
 			RequireShardedCluster: true,
@@ -145,7 +182,7 @@ func TestLiveSDKReadOnlyE2E(t *testing.T) {
 		}
 	}
 
-	slowlog, err := client.SlowlogSummary(ctx, SlowlogOptions{
+	slowlog, err := collector.SlowlogSummary(ctx, SlowlogOptions{
 		Sort:        SlowlogSortCount,
 		Concurrency: 2,
 	})
@@ -168,7 +205,7 @@ func TestLiveSDKReadOnlyE2E(t *testing.T) {
 			fields.PlanCacheKey,
 		)
 	}
-	detail, err := client.SlowlogDetail(ctx, slowlogDatabase, queryHash)
+	detail, err := collector.SlowlogDetail(ctx, slowlogDatabase, queryHash)
 	if err != nil {
 		t.Fatalf("SlowlogDetail failed: %v", err)
 	}
@@ -176,8 +213,29 @@ func TestLiveSDKReadOnlyE2E(t *testing.T) {
 		t.Fatalf("SlowlogDetail returned an empty result")
 	}
 
+	mode := "legacy"
+	if sessionMode {
+		mode = "session"
+		sessionStats := session.Stats()
+		if sessionStats.TopologyLoads != 1 {
+			t.Fatalf("session topology loads = %d, want 1", sessionStats.TopologyLoads)
+		}
+		if expectedCluster == ClusterSharded && sessionStats.ShardInventoryLoads != 1 {
+			t.Fatalf("session shard inventory loads = %d, want 1", sessionStats.ShardInventoryLoads)
+		}
+		if sessionStats.PeakRemoteOperations > 4 {
+			t.Fatalf("session peak remote operations = %d, want <= 4", sessionStats.PeakRemoteOperations)
+		}
+		connectionUpperBound := len(overview.ReplicaSets) + liveNodeCount(overview)
+		if sessionStats.DerivedConnectionsOpened > int64(connectionUpperBound) {
+			t.Fatalf("session derived connections = %d, want <= %d", sessionStats.DerivedConnectionsOpened, connectionUpperBound)
+		}
+		t.Logf("session stats: topologyLoads=%d shardLoads=%d replicaSetLoads=%d opened=%d hits=%d remote=%d peak=%d", sessionStats.TopologyLoads, sessionStats.ShardInventoryLoads, sessionStats.ReplicaSetInventoryLoads, sessionStats.DerivedConnectionsOpened, sessionStats.DerivedConnectionCacheHits, sessionStats.RemoteOperations, sessionStats.PeakRemoteOperations)
+	}
 	t.Logf(
-		"live read-only E2E passed: clusterType=%s replicaSets=%d nodes=%d collections=%d doctorStatuses=%d ops=%d hotspotNamespaces=%d indexCollections=%d capacityDatabases=%d slowlogReplicaSets=%d slowlogItems=%d detailIndexes=%d",
+		"live read-only E2E passed: mode=%s duration=%s clusterType=%s replicaSets=%d nodes=%d collections=%d doctorStatuses=%d ops=%d hotspotNamespaces=%d indexCollections=%d capacityDatabases=%d slowlogReplicaSets=%d slowlogItems=%d detailIndexes=%d",
+		mode,
+		time.Since(startedAt),
 		overview.ClusterType,
 		len(overview.ReplicaSets),
 		liveNodeCount(overview),

@@ -127,8 +127,22 @@ type CapacityDiffResult struct {
 	Collections       []CollectionCapacityDiff `json:"collections"`
 }
 
+type shardCapacityTargetCollection struct {
+	capacity   *ShardCapacity
+	filesystem *FilesystemCapacity
+	statuses   []CollectorStatus
+	errors     []error
+}
+
+type shardCapacityTargetLoader func(ctx context.Context, target hotspotTarget) shardCapacityTargetCollection
+
 // Capacity 采集稳定、脱敏且 presence-aware 的容量快照；SDK 不写本地文件。
 func (c *Client) Capacity(ctx context.Context, opts CapacityOptions) (result *CapacityResult, err error) {
+	if c != nil && c.session == nil {
+		return withEphemeralCollectorSession(ctx, c, func(session *CollectorSession) (*CapacityResult, error) {
+			return session.Capacity(ctx, opts)
+		})
+	}
 	opts, err = normalizeCapacityOptions(opts)
 	if err != nil {
 		return nil, err
@@ -137,7 +151,7 @@ func (c *Client) Capacity(ctx context.Context, opts CapacityOptions) (result *Ca
 		return nil, err
 	}
 	defer func() { err = mapContextError(err) }()
-	cluster, err := pkgmongo.DetectCluster(ctx, c.conn)
+	cluster, err := c.detectCluster(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -176,29 +190,36 @@ func (c *Client) Capacity(ctx context.Context, opts CapacityOptions) (result *Ca
 	var mu sync.Mutex
 	collectorErrors := append([]error(nil), targetErrors...)
 	group, groupCtx := errgroup.WithContext(ctx)
-	limit := semaphore.NewWeighted(int64(opts.Concurrency))
+	capabilityLimit := semaphore.NewWeighted(int64(opts.Concurrency))
 	for _, ref := range refs {
-		if acquireErr := acquireDiagnosticSlot(groupCtx, limit); acquireErr != nil {
-			mu.Lock()
-			collectorErrors = append(collectorErrors, acquireErr)
-			mu.Unlock()
-			break
-		}
 		ref := ref
 		group.Go(func() error {
-			defer limit.Release(1)
+			release, acquireErr := c.acquireCapabilityRemoteSlot(groupCtx, capabilityLimit)
+			if acquireErr != nil {
+				mu.Lock()
+				collectorErrors = append(collectorErrors, acquireErr)
+				mu.Unlock()
+				return nil
+			}
 			scope := FindingScope{Type: ScopeNamespace, Database: ref.Database, Namespace: ref.Database + "." + ref.Collection}
 			snapshot, collectErr := c.conn.CollectionCapacity(groupCtx, ref.Database, ref.Collection, false, 5*time.Second)
+			release()
 			var freeSnapshot pkgmongo.CollectionCapacitySnapshot
 			var freeErr error
 			if collectErr == nil && opts.IncludeFreeStorage {
-				freeSnapshot, freeErr = c.conn.CollectionCapacity(groupCtx, ref.Database, ref.Collection, true, 5*time.Second)
+				freeRelease, freeAcquireErr := c.acquireCapabilityRemoteSlot(groupCtx, capabilityLimit)
+				if freeAcquireErr != nil {
+					freeErr = freeAcquireErr
+				} else {
+					freeSnapshot, freeErr = c.conn.CollectionCapacity(groupCtx, ref.Database, ref.Collection, true, 5*time.Second)
+					freeRelease()
+				}
 			}
 			var shards []ShardCapacity
 			var shardStatuses []CollectorStatus
 			var shardErrors []error
 			if collectErr == nil && len(shardTargets) > 0 {
-				shards, shardStatuses, shardErrors = c.collectShardCapacityDetails(groupCtx, ref, shardTargets, opts.IncludeFreeStorage)
+				shards, shardStatuses, shardErrors = c.collectShardCapacityDetails(groupCtx, ref, shardTargets, opts.IncludeFreeStorage, capabilityLimit)
 			}
 			mu.Lock()
 			defer mu.Unlock()
@@ -239,10 +260,16 @@ func (c *Client) Capacity(ctx context.Context, opts CapacityOptions) (result *Ca
 	_ = group.Wait()
 	for _, database := range sortedCapacityDatabaseNames(byDatabase) {
 		db := byDatabase[database]
+		release, acquireErr := c.acquireCapabilityRemoteSlot(ctx, capabilityLimit)
+		if acquireErr != nil {
+			collectorErrors = append(collectorErrors, acquireErr)
+			break
+		}
 		snapshot, collectErr := c.conn.DatabaseCapacity(ctx, database, false, 5*time.Second)
+		release()
 		scope := FindingScope{Type: ScopeDatabase, Database: database}
 		if len(shardTargets) > 0 {
-			filesystems, filesystemStatuses, filesystemErrors := c.collectShardDatabaseFilesystems(ctx, database, shardTargets)
+			filesystems, filesystemStatuses, filesystemErrors := c.collectShardDatabaseFilesystems(ctx, database, shardTargets, capabilityLimit)
 			db.Filesystems = filesystems
 			result.CollectorStatuses = append(result.CollectorStatuses, filesystemStatuses...)
 			collectorErrors = append(collectorErrors, filesystemErrors...)
@@ -256,7 +283,15 @@ func (c *Client) Capacity(ctx context.Context, opts CapacityOptions) (result *Ca
 			applyDatabaseCapacity(db, snapshot)
 			result.CollectorStatuses = append(result.CollectorStatuses, CollectorStatus{Name: "database_capacity", State: CapabilitySupported, Scope: scope})
 			if opts.IncludeFreeStorage {
-				freeSnapshot, freeErr := c.conn.DatabaseCapacity(ctx, database, true, 5*time.Second)
+				var freeSnapshot pkgmongo.DatabaseCapacitySnapshot
+				freeRelease, freeAcquireErr := c.acquireCapabilityRemoteSlot(ctx, capabilityLimit)
+				var freeErr error
+				if freeAcquireErr != nil {
+					freeErr = freeAcquireErr
+				} else {
+					freeSnapshot, freeErr = c.conn.DatabaseCapacity(ctx, database, true, 5*time.Second)
+					freeRelease()
+				}
 				switch {
 				case freeErr == nil:
 					db.FreeStorageSizeBytes = freeSnapshot.FreeStorageSizeBytes
@@ -289,7 +324,7 @@ func (c *Client) Capacity(ctx context.Context, opts CapacityOptions) (result *Ca
 }
 
 func (c *Client) capacityPrimaryTargets(ctx context.Context) ([]hotspotTarget, []CollectorStatus, []error) {
-	shards, err := c.conn.ListShards(ctx)
+	shards, err := c.listShards(ctx)
 	if err != nil {
 		return nil, nil, []error{err}
 	}
@@ -314,7 +349,7 @@ func (c *Client) capacityPrimaryTargets(ctx context.Context) ([]hotspotTarget, [
 			statuses = append(statuses, failedCollectorStatus("collection_capacity", scope, connectErr))
 			continue
 		}
-		status, statusErr := conn.RsStatus(ctx)
+		inventory, statusErr := c.replicaSetInventory(ctx, conn, replicaSet)
 		c.closeDerivedConnection(ctx, conn)
 		if statusErr != nil {
 			collectorErrors = append(collectorErrors, statusErr)
@@ -322,9 +357,9 @@ func (c *Client) capacityPrimaryTargets(ctx context.Context) ([]hotspotTarget, [
 			continue
 		}
 		found := false
-		for _, member := range status.Members {
+		for _, member := range inventory.Members {
 			if member.Health == 1 && member.State == pkgmongo.StatePrimary {
-				targets = append(targets, hotspotTarget{Shard: shard.Id, ReplicaSet: status.Set, Address: member.Name})
+				targets = append(targets, hotspotTarget{Shard: shard.Id, ReplicaSet: inventory.Name, Address: member.Name})
 				found = true
 				break
 			}
@@ -338,49 +373,55 @@ func (c *Client) capacityPrimaryTargets(ctx context.Context) ([]hotspotTarget, [
 	return targets, statuses, collectorErrors
 }
 
-func (c *Client) collectShardCapacityDetails(ctx context.Context, ref indexCollectionRef, targets []hotspotTarget, includeFreeStorage bool) ([]ShardCapacity, []CollectorStatus, []error) {
+func (c *Client) collectShardCapacityDetails(ctx context.Context, ref indexCollectionRef, targets []hotspotTarget, includeFreeStorage bool, capabilityLimit *semaphore.Weighted) ([]ShardCapacity, []CollectorStatus, []error) {
 	var result []ShardCapacity
 	var statuses []CollectorStatus
 	var collectorErrors []error
-	for _, target := range targets {
+	items := collectShardCapacityTargets(ctx, targets, func(ctx context.Context, target hotspotTarget) shardCapacityTargetCollection {
 		if contextError(ctx) != nil {
-			collectorErrors = append(collectorErrors, contextError(ctx))
-			break
+			return shardCapacityTargetCollection{errors: []error{contextError(ctx)}}
 		}
 		scope := FindingScope{Type: ScopeNamespace, Shard: target.Shard, ReplicaSet: target.ReplicaSet, Node: target.Address, Database: ref.Database, Namespace: ref.Database + "." + ref.Collection}
+		release, acquireErr := c.acquireCapabilityRemoteSlot(ctx, capabilityLimit)
+		if acquireErr != nil {
+			return shardCapacityTargetCollection{errors: []error{acquireErr}}
+		}
+		defer release()
 		conn, connectErr := c.connectAddress(ctx, target.Address, derivedConnectionOptions{Direct: boolPointer(true)})
 		if connectErr != nil {
-			collectorErrors = append(collectorErrors, connectErr)
-			statuses = append(statuses, failedCollectorStatus("collection_capacity", scope, connectErr))
-			continue
+			return shardCapacityTargetCollection{statuses: []CollectorStatus{failedCollectorStatus("collection_capacity", scope, connectErr)}, errors: []error{connectErr}}
 		}
+		defer c.closeDerivedConnection(ctx, conn)
 		collections, listErr := conn.Client.Database(ref.Database).ListCollectionNames(ctx, bson.D{{Key: "name", Value: ref.Collection}})
 		if listErr != nil {
-			c.closeDerivedConnection(ctx, conn)
 			status := failedCollectorStatus("collection_capacity", scope, listErr)
-			statuses = append(statuses, status)
+			item := shardCapacityTargetCollection{statuses: []CollectorStatus{status}}
 			if status.State == CapabilityFailed {
-				collectorErrors = append(collectorErrors, listErr)
+				item.errors = append(item.errors, listErr)
 			}
-			continue
+			return item
 		}
 		if len(collections) == 0 {
-			c.closeDerivedConnection(ctx, conn)
-			statuses = append(statuses, CollectorStatus{Name: "collection_capacity", State: CapabilitySkipped, Scope: scope, ReasonCode: "namespace_not_on_shard", Message: "该 shard 不承载此 namespace"})
-			continue
+			return shardCapacityTargetCollection{statuses: []CollectorStatus{{Name: "collection_capacity", State: CapabilitySkipped, Scope: scope, ReasonCode: "namespace_not_on_shard", Message: "该 shard 不承载此 namespace"}}}
 		}
 		snapshot, collectErr := conn.CollectionCapacity(ctx, ref.Database, ref.Collection, includeFreeStorage, 5*time.Second)
-		c.closeDerivedConnection(ctx, conn)
 		if collectErr != nil {
 			status := failedCollectorStatus("collection_capacity", scope, collectErr)
-			statuses = append(statuses, status)
+			item := shardCapacityTargetCollection{statuses: []CollectorStatus{status}}
 			if status.State == CapabilityFailed {
-				collectorErrors = append(collectorErrors, collectErr)
+				item.errors = append(item.errors, collectErr)
 			}
-			continue
+			return item
 		}
-		result = append(result, ShardCapacity{Shard: target.Shard, Host: target.Address, Count: snapshot.Count, AverageObjectBytes: snapshot.AverageObjectBytes, DataSizeBytes: snapshot.DataSizeBytes, StorageSizeBytes: snapshot.StorageSizeBytes, IndexSizeBytes: snapshot.TotalIndexSizeBytes, FreeStorageSizeBytes: snapshot.FreeStorageSizeBytes})
-		statuses = append(statuses, CollectorStatus{Name: "collection_capacity", State: CapabilitySupported, Scope: scope})
+		capacity := ShardCapacity{Shard: target.Shard, Host: target.Address, Count: snapshot.Count, AverageObjectBytes: snapshot.AverageObjectBytes, DataSizeBytes: snapshot.DataSizeBytes, StorageSizeBytes: snapshot.StorageSizeBytes, IndexSizeBytes: snapshot.TotalIndexSizeBytes, FreeStorageSizeBytes: snapshot.FreeStorageSizeBytes}
+		return shardCapacityTargetCollection{capacity: &capacity, statuses: []CollectorStatus{{Name: "collection_capacity", State: CapabilitySupported, Scope: scope}}}
+	})
+	for _, item := range items {
+		if item.capacity != nil {
+			result = append(result, *item.capacity)
+		}
+		statuses = append(statuses, item.statuses...)
+		collectorErrors = append(collectorErrors, item.errors...)
 	}
 	sort.SliceStable(result, func(i, j int) bool {
 		if result[i].Shard != result[j].Shard {
@@ -391,34 +432,43 @@ func (c *Client) collectShardCapacityDetails(ctx context.Context, ref indexColle
 	return result, statuses, collectorErrors
 }
 
-func (c *Client) collectShardDatabaseFilesystems(ctx context.Context, database string, targets []hotspotTarget) ([]FilesystemCapacity, []CollectorStatus, []error) {
+func (c *Client) collectShardDatabaseFilesystems(ctx context.Context, database string, targets []hotspotTarget, capabilityLimit *semaphore.Weighted) ([]FilesystemCapacity, []CollectorStatus, []error) {
 	var result []FilesystemCapacity
 	var statuses []CollectorStatus
 	var collectorErrors []error
-	for _, target := range targets {
+	items := collectShardCapacityTargets(ctx, targets, func(ctx context.Context, target hotspotTarget) shardCapacityTargetCollection {
 		if contextError(ctx) != nil {
-			collectorErrors = append(collectorErrors, contextError(ctx))
-			break
+			return shardCapacityTargetCollection{errors: []error{contextError(ctx)}}
 		}
 		scope := FindingScope{Type: ScopeNode, Shard: target.Shard, ReplicaSet: target.ReplicaSet, Node: target.Address, Database: database}
+		release, acquireErr := c.acquireCapabilityRemoteSlot(ctx, capabilityLimit)
+		if acquireErr != nil {
+			return shardCapacityTargetCollection{errors: []error{acquireErr}}
+		}
+		defer release()
 		conn, connectErr := c.connectAddress(ctx, target.Address, derivedConnectionOptions{Direct: boolPointer(true)})
 		if connectErr != nil {
-			collectorErrors = append(collectorErrors, connectErr)
-			statuses = append(statuses, failedCollectorStatus("database_filesystem", scope, connectErr))
-			continue
+			return shardCapacityTargetCollection{statuses: []CollectorStatus{failedCollectorStatus("database_filesystem", scope, connectErr)}, errors: []error{connectErr}}
 		}
+		defer c.closeDerivedConnection(ctx, conn)
 		snapshot, collectErr := conn.DatabaseCapacity(ctx, database, false, 5*time.Second)
-		c.closeDerivedConnection(ctx, conn)
 		if collectErr != nil {
 			status := failedCollectorStatus("database_filesystem", scope, collectErr)
-			statuses = append(statuses, status)
+			item := shardCapacityTargetCollection{statuses: []CollectorStatus{status}}
 			if status.State == CapabilityFailed {
-				collectorErrors = append(collectorErrors, collectErr)
+				item.errors = append(item.errors, collectErr)
 			}
-			continue
+			return item
 		}
-		result = append(result, FilesystemCapacity{Shard: target.Shard, Host: target.Address, FSUsedSizeBytes: snapshot.FSUsedSizeBytes, FSTotalSizeBytes: snapshot.FSTotalSizeBytes})
-		statuses = append(statuses, CollectorStatus{Name: "database_filesystem", State: CapabilitySupported, Scope: scope})
+		filesystem := FilesystemCapacity{Shard: target.Shard, Host: target.Address, FSUsedSizeBytes: snapshot.FSUsedSizeBytes, FSTotalSizeBytes: snapshot.FSTotalSizeBytes}
+		return shardCapacityTargetCollection{filesystem: &filesystem, statuses: []CollectorStatus{{Name: "database_filesystem", State: CapabilitySupported, Scope: scope}}}
+	})
+	for _, item := range items {
+		if item.filesystem != nil {
+			result = append(result, *item.filesystem)
+		}
+		statuses = append(statuses, item.statuses...)
+		collectorErrors = append(collectorErrors, item.errors...)
 	}
 	sort.SliceStable(result, func(i, j int) bool {
 		if result[i].Shard != result[j].Shard {
@@ -427,6 +477,23 @@ func (c *Client) collectShardDatabaseFilesystems(ctx context.Context, database s
 		return result[i].Host < result[j].Host
 	})
 	return result, statuses, collectorErrors
+}
+
+func collectShardCapacityTargets(ctx context.Context, targets []hotspotTarget, load shardCapacityTargetLoader) []shardCapacityTargetCollection {
+	if load == nil {
+		return []shardCapacityTargetCollection{{errors: []error{invalidOptions("shard capacity target loader is required")}}}
+	}
+	result := make([]shardCapacityTargetCollection, len(targets))
+	group, groupCtx := errgroup.WithContext(ctx)
+	for i := range targets {
+		i := i
+		group.Go(func() error {
+			result[i] = load(groupCtx, targets[i])
+			return nil
+		})
+	}
+	_ = group.Wait()
+	return result
 }
 
 func mergeShardFreeStorage(target *pkgmongo.CollectionCapacitySnapshot, source pkgmongo.CollectionCapacitySnapshot) {
@@ -460,16 +527,16 @@ func (c *Client) capacityIdentity(ctx context.Context, clusterType pkgmongo.Clus
 	inputs := []string{string(clusterType)}
 	switch clusterType {
 	case pkgmongo.ClusterRepl:
-		status, err := c.conn.RsStatus(ctx)
+		inventory, err := c.replicaSetInventory(ctx, c.conn, "base")
 		if err != nil {
 			return CapacityIdentity{}, err
 		}
-		inputs = append(inputs, status.Set)
-		for _, member := range status.Members {
+		inputs = append(inputs, inventory.Name)
+		for _, member := range inventory.Members {
 			inputs = append(inputs, strings.ToLower(member.Name))
 		}
 	case pkgmongo.ClusterShard:
-		shards, err := c.conn.ListShards(ctx)
+		shards, err := c.listShards(ctx)
 		if err != nil {
 			return CapacityIdentity{}, err
 		}

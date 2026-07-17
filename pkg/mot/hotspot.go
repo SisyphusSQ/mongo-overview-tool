@@ -90,6 +90,11 @@ type hotspotTarget struct {
 
 // Hotspot 采集 mongod 数据节点的两次累计快照，并按实际间隔计算热点 rate。
 func (c *Client) Hotspot(ctx context.Context, opts HotspotOptions) (result *HotspotResult, err error) {
+	if c != nil && c.session == nil {
+		return withEphemeralCollectorSession(ctx, c, func(session *CollectorSession) (*HotspotResult, error) {
+			return session.Hotspot(ctx, opts)
+		})
+	}
 	opts, err = normalizeHotspotOptions(opts)
 	if err != nil {
 		return nil, err
@@ -102,7 +107,7 @@ func (c *Client) Hotspot(ctx context.Context, opts HotspotOptions) (result *Hots
 	}
 	defer func() { err = mapContextError(err) }()
 
-	cluster, err := pkgmongo.DetectCluster(ctx, c.conn)
+	cluster, err := c.detectCluster(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -143,28 +148,28 @@ func (c *Client) discoverHotspotTargets(ctx context.Context, clusterType pkgmong
 	var targets []hotspotTarget
 	var statuses []CollectorStatus
 	var collectorErrors []error
-	collectReplicaSet := func(conn *pkgmongo.Conn, shard string) {
-		status, err := conn.RsStatus(ctx)
+	collectReplicaSet := func(conn *pkgmongo.Conn, shard, key string) {
+		inventory, err := c.replicaSetInventory(ctx, conn, key)
 		scope := FindingScope{Type: ScopeReplicaSet, Shard: shard}
 		if err != nil {
 			collectorErrors = append(collectorErrors, err)
 			statuses = append(statuses, failedCollectorStatus("hotspot_targets", scope, err))
 			return
 		}
-		scope.ReplicaSet = status.Set
+		scope.ReplicaSet = inventory.Name
 		statuses = append(statuses, CollectorStatus{Name: "hotspot_targets", State: CapabilitySupported, Scope: scope})
-		for _, member := range status.Members {
+		for _, member := range inventory.Members {
 			if member.Health != 1 || (member.State != pkgmongo.StatePrimary && member.State != pkgmongo.StateSecondary) {
 				continue
 			}
-			targets = append(targets, hotspotTarget{ReplicaSet: status.Set, Shard: shard, Address: member.Name})
+			targets = append(targets, hotspotTarget{ReplicaSet: inventory.Name, Shard: shard, Address: member.Name})
 		}
 	}
 	switch clusterType {
 	case pkgmongo.ClusterRepl:
-		collectReplicaSet(c.conn, "")
+		collectReplicaSet(c.conn, "", "base")
 	case pkgmongo.ClusterShard:
-		shards, err := c.conn.ListShards(ctx)
+		shards, err := c.listShards(ctx)
 		if err != nil {
 			return nil, nil, []error{fmt.Errorf("list shards: %w", err)}
 		}
@@ -183,7 +188,7 @@ func (c *Client) discoverHotspotTargets(ctx context.Context, clusterType pkgmong
 				collectorErrors = append(collectorErrors, connectErr)
 				continue
 			}
-			collectReplicaSet(conn, shard.Id)
+			collectReplicaSet(conn, shard.Id, replicaSet)
 			c.closeDerivedConnection(ctx, conn)
 		}
 	}
@@ -213,6 +218,14 @@ func (c *Client) collectHotspotSnapshot(ctx context.Context, targets []hotspotTa
 		target := target
 		group.Go(func() error {
 			defer limit.Release(1)
+			release, acquireErr := c.acquireRemoteSlot(groupCtx)
+			if acquireErr != nil {
+				mu.Lock()
+				collectorErrors = append(collectorErrors, acquireErr)
+				mu.Unlock()
+				return nil
+			}
+			defer release()
 			scope := FindingScope{Type: ScopeNode, ReplicaSet: target.ReplicaSet, Shard: target.Shard, Node: target.Address}
 			conn, connectErr := c.connectAddress(groupCtx, target.Address, derivedConnectionOptions{Direct: boolPointer(true)})
 			if connectErr != nil {
