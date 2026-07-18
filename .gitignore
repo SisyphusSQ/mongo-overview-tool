@@ -21,9 +21,12 @@ temp/
 # Harness plans
 .agents/plans/**/*.md
 !.agents/plans/TEMPLATE.md
+!.agents/plans/EXAMPLE-implementation.md
 
 # Cursor files are not part of this repository control plane.
-.cursor/
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/*.mdc
 
 # Go
 bin/

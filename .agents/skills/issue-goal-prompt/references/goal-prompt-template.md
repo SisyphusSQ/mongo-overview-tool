@@ -14,6 +14,8 @@
 当前模式：
 - issue_provider: <linear|github|gitlab|repo|other>
 - mode: <propose-only|plan-only|create-issues|implement-no-merge|full-auto>
+- review_policy: <standard|strict>
+- subagent_review_required: <true|false>
 - default_boundary: pre-commit ready，除非用户明确要求 commit / push / merge / Done
 
 分支要求：
@@ -85,18 +87,19 @@ Harness 要求：
 - 修改某个目录下代码前，读取就近 `AGENTS.md`。
 - 新增或变更外部可见接口、schema、contract、runbook 或示例时，同步相关仓库真相。
 - 不保存真实凭据、token、Cookie、完整 URL、真实数据库主机、真实 SQL 或其它敏感输出到提交版文档。
-- 本仓是 Go CLI 工具，模块路径固定为 `github.com/SisyphusSQ/mongo-overview-tool`。
+- 本仓是 Go CLI 工具，模块路径固定为 `github.com/SisyphusSQ/mongo-overview-tool/v2`。
 - 不得顺手调整 `go.mod` 中的 `go 1.26`。
 - 不得顺手升级或降级 `go.mongodb.org/mongo-driver v1.10.6`。
 - Go import 按标准库、外部依赖、项目内部包三段式组织，空分组直接省略。
 - 新增测试时用注释写清测试场景；调试输出优先用 `t.Logf`，避免输出敏感连接信息。
 
 评审要求：
-- 验证通过后，必须执行独立评审。
-- 默认 `review_owner: subagent`。
-- 主 agent 自审不能满足默认评审门禁。
-- 如果 subagent 工具不可用且评审为必需项，停止在 `blocked: subagent_review_unavailable`，写明 `next_action`。
-- 如果有阻塞发现，先修复，再重新执行验证 -> 评审。
+- gate / freeze 阶段根据冻结范围派生 review_policy；用户显式要求独立评审时无条件使用 strict。
+- 多仓 / 多可写 lease / integration、安全 / contract、schema / 数据、并发 / 幂等 / 重试 / 状态机、release / 生产 / 不可逆副作用、required live E2E、full-auto、自动 merge 或未知风险时必须 strict。
+- 未提供 policy 的旧调用按 strict；只有不命中 strict 条件的普通单仓低风险任务才可显式使用 standard。
+- standard 由主 agent 做 findings-first 对抗式自审，`review_owner: main-agent-self-review`。
+- strict 由 subagent 独立评审，`review_owner: subagent`；不可用时停止在 `blocked: subagent_review_unavailable`。
+- 两种 policy 都必须满足 `blocking_findings=none`；有阻塞发现时修复并重新执行验证 -> 评审。
 
 Live E2E 要求：
 - live_e2e_required: <true|false|derive-from-issue>
@@ -112,10 +115,17 @@ Live E2E 要求：
 - `git diff --check`
 - <任务或 runbook 要求的额外命令>
 
+验证证据与复用：
+- `verification_summary` 记录 `evidence_id`、有序命令和结果、`execution_session_id`、`verification_type`、`verified_at` 与 `repository_path`。
+- `verification_type` 只能是 `deterministic-local`、`environment-dependent` 或 `live`。
+- 仅同一 session、同一快照、同一命令顺序、单仓单写入者、无 integration event 且全部为 deterministic-local 时可以复用。
+- 多仓、多 lease、strict、环境依赖、live 或不确定情况必须重跑；required live E2E 永不复用。
+- 复用时仍进入 post-integration verify，记录 `post_integration_verify_summary.status=reused` 与 evidence id；否则记录 `status=executed`。
+
 任务系统回写：
 完成或阻塞时，给任务 <ISSUE-ID> 追加评论，或写入仓库任务回写日志，至少包含：
 - verification_summary
-- review_summary，其中明确 `review_owner`
+- review_summary，其中明确 `review_policy`、`subagent_review_required`、`review_owner` 与 `blocking_findings`
 - integration_summary
 - post_integration_verify_summary
 - writeback_summary
@@ -156,7 +166,8 @@ Live E2E 要求：
 - `goal_state`: ready_to_execute
 - `prompt_length`: <字符数>
 - `plan_required`: true
-- `subagent_review_required`: true
+- `review_policy`: <standard|strict>
+- `subagent_review_required`: <true|false>
 - `live_e2e_policy`: required_if_available_else_manual_gate
 - `pre_commit_boundary`: true
 - `branch_required`: true

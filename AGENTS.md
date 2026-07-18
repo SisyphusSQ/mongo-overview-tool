@@ -1,5 +1,4 @@
 # mongo-overview-tool AGENTS
-
 ## 项目定位
 
 本文件是 `mongo-overview-tool` 的根级协作入口，只负责：
@@ -32,6 +31,7 @@
 | 可选主 thread 编排 Prompt | `.agents/prompts/orchestrator-thread.md`（如存在） |
 | 可选维护循环 Prompt | `.agents/prompts/maintenance-loop.md`（如存在，默认 `report-only`） |
 | 可选 Guide 层 | `.agents/guides/`（如存在） |
+| 验证证据快照 | `scripts/harness/evidence.sh` / `scripts/harness/evidence.ps1` |
 
 ## 真相边界
 
@@ -57,11 +57,14 @@
 
 - 复杂任务默认先写 plan，再进入实现
 - macOS / Linux / Git Bash 默认用 `make harness-verify` 验证 base harness
+- Windows PowerShell 默认用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\harness\check.ps1` 验证 base harness
+- `make harness-verify` 只验证 base harness 运行时关键不变量，不替代项目自身 build / test / lint。
+- 成功验证后可执行 `bash scripts/harness/evidence.sh snapshot` 生成只读快照；是否复用必须遵循 `docs/harness/control-plane.md` 的 session、命令顺序、验证类型和 `review_policy` 规则。
 - Bash / Git Bash 命令示例使用 POSIX 路径；PowerShell 命令示例使用 `C:\path\to\repo` 或 UNC 路径，不自动互转
 - `docs/harness/*.md` 默认应提交
 - 初始化后应在 `docs/harness/project-constraints.md` 中登记项目级机械约束；没有可执行命令或 gate 的规则不得标记为 `enforced`
 - `.agents/plans/TEMPLATE.md` 默认应提交
-- `.agents/plans/` 下除 `TEMPLATE.md` 外的计划实例和示例文件默认不提交
+- `.agents/plans/TEMPLATE.md` 与 `.agents/plans/EXAMPLE-implementation.md` 默认提交；其余计划实例和运行态计划文件默认不提交
 - `.agents/skills/*/SKILL.md` 默认应提交；默认技能脚本只做 dry-run 或显式 `--write` 写入，不直接操作外部系统
 - `.agents/state/TEMPLATE.md` 默认应提交
 - `.agents/runs/TEMPLATE.md` 默认应提交
@@ -76,7 +79,7 @@
 - 已写入 `docs/test/*` 的验证结果摘要是本地脱敏测试真相，后续同步或 closeout 不得删成空模板；原始结果仍放 `.agents/runs/*`
 - `.agents/state/*` 与 `.agents/runs/*` 的真实运行文件默认不提交
 - 本地日志、数据库文件、缓存、IDE 私有文件默认不提交
-- `.cursor/` 默认不提交；旧 Cursor 规则已迁移到本文件和 `docs/harness/project-constraints.md`
+- `.cursor/` 默认不提交；仅允许显式维护的 `.cursor/rules/*.mdc` 规则文件按 harness contract 跟踪
 - `merge` / `escalation` 仍然是流程阶段，但默认不由 initializer 自带 shell gate 承担
 
 ## 项目级工程约束

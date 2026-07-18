@@ -1,5 +1,43 @@
 # Control Plane
 
+
+## Verification Evidence Reuse Contract
+
+验证完成后，`verification_summary` 必须记录：
+
+- `evidence_id`：由 `scripts/harness/evidence.sh snapshot` 或 `scripts/harness/evidence.ps1 -Action Snapshot` 生成。
+- `commands`：Required Verification Commands 的有序命令及逐项结果；集合和顺序都是 contract。
+- `execution_session_id`：当前连续执行 session 的稳定标识；进程重启、任务交接或恢复执行后必须更换。
+- `verification_type`：`deterministic-local`、`environment-dependent` 或 `live`。
+- `verified_at` 与 `repository_path`。
+
+只有以下条件全部满足，post-integration verify 才可复用已有验证证据：
+
+1. 单仓、单写入者，且没有 branch merge、rebase、cherry-pick、冲突处理或 integration fix。
+2. 当前 `evidence_id` 与验证完成时记录的值完全一致，helper 同时返回 `reusable=true`。
+3. Required Verification Commands 的集合和顺序完全一致。
+4. `execution_session_id` 完全一致。
+5. 所有待复用项都是 `deterministic-local` build / test / lint / contract check。
+6. 没有尚未执行的 required live E2E。
+
+多仓、多个可写 lease、`review_policy=strict`、`environment-dependent`、`live`，以及任何发生过集成或历史改写的场景一律重新执行；任何无法确认的情况默认重跑。
+
+复用不改变状态机：仍进入 post-integration verify，并记录 `post_integration_verify_summary.status=reused` 与对应 `evidence_id`。未复用时记录 `status=executed` 和新执行命令。required live E2E 永远不可由本地证据替代。
+
+## Review Policy Contract
+
+在 `gate / freeze` 阶段基于冻结范围派生并记录：
+
+- `review_policy`: `standard` / `strict`
+- `subagent_review_required`: `review_policy == strict`
+
+兼容性规则：用户显式要求独立评审时无条件使用 `strict`；调用方未提供 `review_policy` 时按 `strict`。只有新版 Goal Prompt 完成风险派生且确认不命中 strict 条件时，才可显式写入 `standard`。
+
+`standard` 允许主 agent 执行 findings-first 对抗式自审，回写 `review_owner=main-agent-self-review`；`strict` 必须由未实施该改动的 subagent 独立评审，回写 `review_owner=subagent`。两者都必须满足 `blocking_findings=none`。
+
+以下任一条件自动进入 `strict`：多仓、多个可写 lease 或 branch / worktree 集成；鉴权、安全、权限、公开 API / contract；schema / migration / 数据修改；并发、幂等、重试或业务状态机；release、部署、生产环境或不可逆副作用；required live E2E、full-auto、自动 merge；风险无法可靠判断。
+
+`harness-review-gate` 继续校验完整计划骨架与 `blocking_findings`，不自行推导 reviewer 身份。strict 下 subagent 不可用时保持 `blocked: subagent_review_unavailable`，不得降级为主 agent 自审。
 ## 主流程
 
 固定主流程：
@@ -208,7 +246,7 @@
 - 默认顺序是 `implement -> local/test verify -> review -> integrate -> final verify`。
 - 第一个 `verify` 是执行者或 test thread 的局部验证，用来确认输出进入可 review 状态。
 - review 默认前置；集成后若发生冲突处理、integration fix、diff 形态明显变化、二次 verify 失败后返修，或 write scope 边界有争议，主 thread 必须补轻量 review。
-- `integrate -> verify` 是权威验证。主 thread 集成任何可写 lease 后，必须在集成后的 repo truth 上重新跑最终验证矩阵。
+- `integrate -> verify` 是权威验证。post-integration verify 阶段不得跳过；只有满足 Verification Evidence Reuse Contract 时，确定性本地命令才可记录为证据复用，否则必须在集成后的 repo truth 上重新执行最终验证矩阵。
 - 若 Goal Prompt、Issue Acceptance Matrix、active plan 或 test runbook 声明 required live E2E，则 post-integration verify 必须执行 live E2E；无法执行时停止在 `blocked` / `manual-gate`，不得进入 `verified`、`ready_for_merge` 或 `done`。
 
 ### 跨仓 truth split（按需）
@@ -315,6 +353,7 @@ Maintenance loop 的输出必须包含：
 | --- | --- |
 | 基线检查 | `make harness-check` |
 | 总入口 | `make harness-verify` |
+| Windows 基线检查 | `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\harness\check.ps1` |
 | review gate | `make harness-review-gate PLAN=path/to/plan.md` |
 | Windows review gate | `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\harness\review_gate.ps1 -Plan .\.agents\plans\example.md` |
 | merge | 默认由 agent 根据仓库真相给出 `manual / blocked / merged` 结论 |
@@ -323,7 +362,7 @@ Maintenance loop 的输出必须包含：
 固定要求：
 
 - `harness-check` 除了检查关键文件、关键字段、`.gitignore` contract，还必须做 gate smoke test
-- `review_gate.ps1` 保留 PowerShell review gate 能力，但本仓库不维护 PowerShell baseline check
+- `check.ps1`、`review_gate.ps1` 与 `evidence.ps1` 保持和 Bash 入口一致的 Windows baseline、review gate 与 evidence 能力
 - `review_gate` 只根据 `blocking_findings` 判定 pass / fail
 - `merge` 虽然仍是控制面阶段，但 base harness 默认不内置 shell evaluator
 - `escalation` 虽然仍是控制面阶段，但 base harness 默认不内置 shell evaluator
@@ -420,7 +459,7 @@ Maintenance loop 的输出必须包含：
 - `docs/harness/*.md` 默认应提交
 - `docs/issues/*.md` 默认应提交
 - `.agents/plans/TEMPLATE.md` 默认应提交
-- `.agents/plans/` 下除 `TEMPLATE.md` 外的计划实例和示例文件默认不提交
+- `.agents/plans/TEMPLATE.md` 与 `.agents/plans/EXAMPLE-implementation.md` 默认提交；其余计划实例和运行态计划文件默认不提交
 - 若后续补了 `.agents/prompts/` 与 `.agents/guides/`，这些文档默认也应提交
 
 同时默认不提交：

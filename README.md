@@ -1,5 +1,4 @@
 # Mongo Overview Tool
-
 `mongo-overview-tool` 是一个用于快速获取 MongoDB 集群概览、统计信息以及执行批量维护操作的命令行工具。它支持副本集（ReplicaSet）和分片集群（Sharded Cluster）。
 
 ## 功能特性
@@ -13,6 +12,8 @@
 - **批量操作 (`bulk-delete` / `bulk-update`)**: 支持流控的批量删除和更新操作，减少对线上业务的影响。
 
 ## Harness 控制面
+
+`make harness-check` / `make harness-verify` 只验证 harness 运行时关键不变量，不替代项目自身 build / test / lint。需要记录验证证据时，在仓库根执行 `bash scripts/harness/evidence.sh snapshot`；PowerShell 使用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\harness\\evidence.ps1 -Action Snapshot`。证据复用条件以 `docs/harness/control-plane.md` 为准。
 
 本仓使用 `docs/harness/` 和 `.agents/` 维护 agent 协作控制面。默认 workflow skill 包括：
 
