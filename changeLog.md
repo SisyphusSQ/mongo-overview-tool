@@ -1,6 +1,14 @@
 ## Unreleased
 <!-- 普通 issue 新增条目只写在本 Unreleased 段；不要写入下面已归档版本段。 -->
 
+### v2.2.2(20260719)
+#### feature:
+1. 为索引审计 SDK 增加确定性 cursor batch API，优先按数据库分批，单库超过上限时按 collection 切分；每批硬限制不超过 500，并返回覆盖进度与续跑 cursor。
+#### bugFix:
+1. 将 collection scope 超限从普通 `ErrInvalidOptions` 细化为兼容 `ErrInvalidOptions` 的 `ErrCollectionLimitExceeded` typed error，供接入方稳定映射 4xx，而不是误报 collector/downstream 故障。
+#### note:
+1. cursor 与目标身份、审计语义和 collection catalog 绑定；目录变化时返回 `ErrIndexAuditScopeChanged`，不静默跳过集合。批处理仍为只读扫描，不创建、删除或修改索引，也不构成全局原子快照。
+
 ### v2.2.1(20260717)
 #### feature:
 1. 新增请求级、并发安全的 CollectorSession，覆盖九个只读 capability，并提供生命周期管理和脱敏统计。

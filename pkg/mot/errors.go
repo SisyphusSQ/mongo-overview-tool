@@ -7,14 +7,35 @@ import (
 )
 
 var (
-	ErrInvalidOptions         = errors.New("invalid options")
-	ErrUnsupportedTopology    = errors.New("unsupported topology")
-	ErrNotSharded             = errors.New("not sharded")
-	ErrDangerousOperation     = errors.New("dangerous operation")
-	ErrCancelled              = errors.New("operation cancelled")
-	ErrPartialResult          = errors.New("partial result")
-	ErrCollectorSessionClosed = errors.New("collector session is closed")
+	ErrInvalidOptions          = errors.New("invalid options")
+	ErrCollectionLimitExceeded = errors.New("collection limit exceeded")
+	ErrIndexAuditCursorInvalid = errors.New("index audit cursor invalid")
+	ErrIndexAuditScopeChanged  = errors.New("index audit scope changed")
+	ErrUnsupportedTopology     = errors.New("unsupported topology")
+	ErrNotSharded              = errors.New("not sharded")
+	ErrDangerousOperation      = errors.New("dangerous operation")
+	ErrCancelled               = errors.New("operation cancelled")
+	ErrPartialResult           = errors.New("partial result")
+	ErrCollectorSessionClosed  = errors.New("collector session is closed")
 )
+
+// CollectionLimitError 表示只读 collection scope 超过单次执行上限。
+// 错误只携带数量边界，不包含 database、namespace 或连接信息。
+type CollectionLimitError struct {
+	Limit           int
+	ObservedAtLeast int
+}
+
+func (e *CollectionLimitError) Error() string {
+	if e == nil {
+		return "collection limit exceeded"
+	}
+	return fmt.Sprintf("selected at least %d collections, exceeds max %d", e.ObservedAtLeast, e.Limit)
+}
+
+func (e *CollectionLimitError) Is(target error) bool {
+	return target == ErrCollectionLimitExceeded || target == ErrInvalidOptions
+}
 
 // PartialError 表示操作失败时已经产生了可读取的部分结果。
 type PartialError struct {
@@ -81,6 +102,10 @@ func newDiagnosticPartialError(op string, result any, err error) *DiagnosticPart
 
 func invalidOptions(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalidOptions, fmt.Sprintf(format, args...))
+}
+
+func collectionLimitExceeded(limit, observedAtLeast int) error {
+	return &CollectionLimitError{Limit: limit, ObservedAtLeast: observedAtLeast}
 }
 
 func wrapCancelled(err error) error {

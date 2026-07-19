@@ -189,6 +189,7 @@ func (c *Client) Doctor(ctx context.Context, opts DoctorOptions) (*DoctorResult,
 func (c *Client) CurrentOperations(ctx context.Context, opts CurrentOperationsOptions) (*CurrentOperationsResult, error)
 func (c *Client) Hotspot(ctx context.Context, opts HotspotOptions) (*HotspotResult, error)
 func (c *Client) IndexAudit(ctx context.Context, opts IndexAuditOptions) (*IndexAuditResult, error)
+func (c *Client) IndexAuditBatch(ctx context.Context, opts IndexAuditBatchOptions) (*IndexAuditBatchResult, error)
 func (c *Client) Capacity(ctx context.Context, opts CapacityOptions) (*CapacityResult, error)
 ```
 

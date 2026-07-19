@@ -46,9 +46,28 @@ type IndexAuditResult struct {
     Findings          []DiagnosticFinding  `json:"findings"`
     CollectorStatuses []CollectorStatus    `json:"collectorStatuses"`
 }
+
+type IndexAuditBatchOptions struct {
+    Audit  IndexAuditOptions
+    Cursor string
+}
+
+type IndexAuditBatchResult struct {
+    IndexAuditResult
+    Batch IndexAuditBatchMetadata `json:"batch"`
+}
+
+func (c *Client) IndexAuditBatch(
+    ctx context.Context,
+    opts IndexAuditBatchOptions,
+) (*IndexAuditBatchResult, error)
 ```
 
 每个 index observation 保留：namespace、index name、key pattern、必要的 index properties、host、shard、ops、since、building、size（可获得时）。
+
+`IndexAudit` 保持原子审计兼容语义，collection scope 超过 `MaxCollections` 时返回 `ErrCollectionLimitExceeded`。`IndexAuditBatch` 把 `MaxCollections` 解释为本次执行上限并硬限制为 `1..500`：优先保持数据库整体进入同一批，只有单个数据库本身超过上限时才按稳定排序后的 collection 切分。结果中的 batch metadata 给出本批数量、已处理数量、总数、剩余数量和续跑 cursor。
+
+cursor 由 Client 内部连接身份派生的不可输出 key 签名，并绑定审计筛选与 collection catalog；URI、credential、database 和 namespace 均不进入 cursor payload、错误或日志。连接身份或 credential 变化会使旧 cursor 失效；审计语义或 catalog 变化返回 `ErrIndexAuditScopeChanged`，不能静默漏审。`MaxCollections` 和 `Concurrency` 不进入审计语义指纹，因此响应过大或超时时可以用同一起始 cursor 缩小下一次执行规模。每次 public batch 调用使用 fresh request session 重新读取 catalog；cursor 不承担认证，接入方仍需重新完成授权和连接解析。
 
 ## 索引审计规则
 
@@ -186,7 +205,7 @@ diff 输出：
 
 ## 成本保护
 
-- `MaxCollections` 默认 500；超过时要求 database / collection 过滤或显式提高上限。
+- `MaxCollections` 默认 500；原子 API 超过时返回 typed collection limit error，批处理 API 每次硬限制不超过 500。
 - free storage collector 标记 `expensive-opt-in`，单独超时和 status。
 - collection 级任务使用有界并发；同一 node 不进行无上限 fan-out。
 - 对 view 识别并跳过 storage stats，不能因单个 view 使数据库失败。
@@ -199,6 +218,7 @@ diff 输出：
 - free storage 默认不执行，显式启用后仍受数量和超时保护。
 - capacity fixture 覆盖普通、分片、空集合、view、字段缺失和异常关闭提示。
 - snapshot diff 覆盖新增/删除集合、schema version、不同集群和不可比较字段。
+- index audit batch 覆盖多数据库装箱、单库拆分、游标续跑、catalog 漂移、无重复和无遗漏。
 - SDK 不读写本地快照文件；CLI adapter 的写入错误不会丢失已采集 result。
 
 ## 参考资料
