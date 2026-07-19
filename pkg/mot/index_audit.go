@@ -150,8 +150,20 @@ func (c *Client) IndexAudit(ctx context.Context, opts IndexAuditOptions) (result
 		return nil, invalidOptions("no collections selected")
 	}
 	if len(refs) > opts.MaxCollections {
-		return nil, invalidOptions("selected %d collections, exceeds max %d", len(refs), opts.MaxCollections)
+		return nil, collectionLimitExceeded(opts.MaxCollections, len(refs))
 	}
+	return c.collectIndexAuditRefs(ctx, opts, cluster.Type, result, refs, consistencyRequested, generalRequested)
+}
+
+func (c *Client) collectIndexAuditRefs(
+	ctx context.Context,
+	opts IndexAuditOptions,
+	clusterType pkgmongo.ClusterType,
+	result *IndexAuditResult,
+	refs []indexCollectionRef,
+	consistencyRequested bool,
+	generalRequested bool,
+) (*IndexAuditResult, error) {
 	collectionsByNamespace := make(map[string]CollectionIndexAudit, len(refs))
 	var collectorErrors []error
 	if consistencyRequested {
@@ -166,7 +178,7 @@ func (c *Client) IndexAudit(ctx context.Context, opts IndexAuditOptions) (result
 		collectorErrors = append(collectorErrors, consistencyErrors...)
 	}
 	if generalRequested {
-		targets, targetStatuses, discoveryErrors := c.discoverHotspotTargets(ctx, cluster.Type)
+		targets, targetStatuses, discoveryErrors := c.discoverHotspotTargets(ctx, clusterType)
 		result.CollectorStatuses = append(result.CollectorStatuses, targetStatuses...)
 		collectorErrors = append(collectorErrors, discoveryErrors...)
 		var mu sync.Mutex
@@ -178,7 +190,7 @@ func (c *Client) IndexAudit(ctx context.Context, opts IndexAuditOptions) (result
 			}
 			ref := ref
 			group.Go(func() error {
-				collection, statuses, collectErrors := c.collectIndexAuditCollection(groupCtx, ref, targets, opts, result.CollectedAt, cluster.Type == pkgmongo.ClusterRepl, capabilityLimit)
+				collection, statuses, collectErrors := c.collectIndexAuditCollection(groupCtx, ref, targets, opts, result.CollectedAt, clusterType == pkgmongo.ClusterRepl, capabilityLimit)
 				mu.Lock()
 				collectionsByNamespace[collection.Namespace] = mergeIndexAuditCollections(collectionsByNamespace[collection.Namespace], collection)
 				result.CollectorStatuses = append(result.CollectorStatuses, statuses...)
@@ -287,7 +299,7 @@ func (c *Client) indexCollectionRefs(ctx context.Context, opts IndexAuditOptions
 		}
 		refs = append(refs, selectIndexCollectionRefs(database, metadataValues, opts.Collections)...)
 		if opts.MaxCollections > 0 && len(refs) > opts.MaxCollections {
-			return nil, invalidOptions("selected collections exceed max %d", opts.MaxCollections)
+			return nil, collectionLimitExceeded(opts.MaxCollections, len(refs))
 		}
 	}
 	sort.SliceStable(refs, func(i, j int) bool {
