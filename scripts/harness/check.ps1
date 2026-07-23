@@ -73,9 +73,6 @@ $requiredFiles = @(
     "AGENTS.md",
     "README.md",
     "docs/harness/control-plane.md",
-    "docs/harness/issue-workflow.md",
-    "docs/harness/linear.md",
-    "docs/harness/project-constraints.md",
     "docs/issues/README.md",
     "docs/issues/TEMPLATE.md",
     "docs/test/RUNBOOK_TEMPLATE.md",
@@ -113,6 +110,22 @@ foreach ($path in $requiredFiles) {
     }
 }
 
+$obsoleteFiles = @(
+    "docs/harness/README.md",
+    "docs/harness/prompt-templates.md",
+    "docs/harness/issue-workflow.md",
+    "docs/harness/linear.md",
+    "docs/harness/project-constraints.md",
+    ".agents/prompts/loop-codex.md",
+    ".agents/prompts/loop-automation.md",
+    ".agents/prompts/maintenance-loop.md"
+)
+foreach ($path in $obsoleteFiles) {
+    if (Test-Path -LiteralPath $path) {
+        Fail -Message "Obsolete harness file should not exist anymore: $path"
+    }
+}
+
 if (Test-Path -LiteralPath "docs/harness/prompt-templates.md" -PathType Leaf) {
     Fail -Message "Obsolete harness file should not exist anymore: docs/harness/prompt-templates.md"
 }
@@ -130,8 +143,7 @@ foreach ($item in $skillFrontmatter) {
     Assert-FileContains -Path $item[0] -Pattern "description:" -Message "Skill frontmatter is incomplete: $($item[0])"
 }
 
-$defaultSkillPaths = @($skillFrontmatter | ForEach-Object { Split-Path -Parent $_[0] })
-$projectSpecific = Get-ChildItem -LiteralPath $defaultSkillPaths -Recurse -File -Force |
+$projectSpecific = Get-ChildItem -LiteralPath ".agents/skills" -Recurse -File -Force |
     Select-String -Pattern "DBBridge|db_bridge_test|/Users/suqing|TEA-" -CaseSensitive
 if ($projectSpecific) {
     Fail -Message "Default harness skills must not contain project-specific constants"
@@ -217,9 +229,6 @@ if (Test-Path -LiteralPath ".cursor/rules/harness.mdc" -PathType Leaf) {
 $optionalModeFiles = @(
     ".agents/prompts/orchestrator-thread.md",
     ".agents/prompts/issue-standard-workflow.md",
-    ".agents/prompts/loop-codex.md",
-    ".agents/prompts/loop-automation.md",
-    ".agents/prompts/maintenance-loop.md",
     ".agents/guides/code-review.md",
     ".agents/guides/linter.md"
 )

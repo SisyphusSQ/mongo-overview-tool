@@ -20,17 +20,14 @@ description: 从任务系统条目生成可执行目标提示词，适用于 har
 
 1. `AGENTS.md`
 2. `docs/harness/control-plane.md`
-3. `docs/harness/issue-workflow.md`
-4. 当前启用的任务系统配置说明，例如 `issue-provider=linear` 时读取 `docs/harness/linear.md`
-5. `.agents/PLANS.md`
-6. `.agents/plans/TEMPLATE.md`
-7. `.agents/prompts/issue-standard-workflow.md`（如存在）
-8. `.agents/prompts/orchestrator-thread.md`（需要多线程、worktree 或 subagent 编排且文件存在时）
-9. `.agents/guides/code-review.md`（如存在）
-10. `docs/harness/project-constraints.md`
-11. `go.mod`
-12. 任务正文、评论、标签 / 状态和链接的来源文档
-13. 任务或用户点名的来源文档
+3. `.agents/PLANS.md`
+4. `.agents/plans/TEMPLATE.md`
+5. `.agents/prompts/issue-standard-workflow.md`（如存在）
+6. `.agents/prompts/orchestrator-thread.md`（需要多任务交接时）
+7. `.agents/guides/code-review.md`（如存在）
+8. `go.mod`
+9. 任务正文、评论、标签 / 状态和链接的来源文档
+10. 任务或用户点名的来源文档
 
 如果真相来源冲突，协作状态以任务系统为准，执行约束以仓库文档和代码为准。未能自行消解的冲突必须写进生成的提示词。
 
@@ -58,8 +55,9 @@ description: 从任务系统条目生成可执行目标提示词，适用于 har
    - 除非用户明确要求，不要 commit、push、merge 或 mark Done。
    - MongoDB live E2E 默认从 issue、来源文档或 `docs/test/*` runbook 推导；没有明确安全环境、数据范围、凭据和清理方式时，在本地验证后停止在 `manual_gate_live_e2e`。
    - 如果 live E2E 不适用，设置 `live_e2e_status: not_required`。
-7. 编码验证证据复用规则：用 evidence helper 记录 `evidence_id`、有序命令和结果、`execution_session_id`、验证类型、时间和仓库路径；仅同 session、同快照、同命令的单仓单写入者 `deterministic-local` 证据可复用。多仓、多 lease、strict、环境依赖、live、integration 或不确定情况重跑，required live E2E 永不复用。
-8. 加入任务系统回写要求：验证、评审、集成、集成后验证、验证证据复用、live E2E 状态、残余风险、恢复点和下一步。
+7. 编码精简主线：默认使用 `collect + gate -> freeze + slice -> implement -> verify -> review -> closeout`；只有 fan-out 才进入 dispatch，只有 integration event 才进入 integrate 与 post-integration verify，只有获得授权才进入 PR / MR 可选交付。
+8. 编码验证证据复用规则：没有 integration event 时，同 session、同快照、同命令的单仓单写入者 `deterministic-local` 证据可沿用到 closeout；发生 integration event 时必须重新验证。多仓、多 lease、strict、环境依赖、live 或不确定情况重跑，required live E2E 永不复用。
+9. 加入任务系统回写要求：验证、评审、live E2E 状态、残余风险、恢复点和下一步；集成与可选交付结果只在进入对应条件分支时回写。
 
 ## 本仓项目约束
 

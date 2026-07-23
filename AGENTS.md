@@ -8,16 +8,15 @@
 3. 定义 `docs/harness/` 与 `.agents/` 的边界
 4. 明确哪些内容默认不提交
 
+项目 `README.md` 只负责业务说明，不承载 Harness 规则。
+
 ## 快速导航
 
 | 主题 | 入口 |
 | --- | --- |
 | 仓库说明 | `README.md` |
 | 主流程、gate、计划 contract | `docs/harness/control-plane.md` |
-| Issue Workflow 与模板 | `docs/harness/issue-workflow.md` |
-| Linear 兼容 profile | `docs/harness/linear.md` |
 | 仓库内 issue 存储 | `docs/issues/` |
-| 项目级机械约束登记 | `docs/harness/project-constraints.md` |
 | 计划协议 | `.agents/PLANS.md` |
 | 计划主模板 | `.agents/plans/TEMPLATE.md` |
 | 默认技能层 | `.agents/skills/` |
@@ -29,15 +28,22 @@
 | 本地结果面 | `.agents/runs/TEMPLATE.md` |
 | 可选 Prompt 层 | `.agents/prompts/README.md`（如存在） |
 | 可选主 thread 编排 Prompt | `.agents/prompts/orchestrator-thread.md`（如存在） |
-| 可选维护循环 Prompt | `.agents/prompts/maintenance-loop.md`（如存在，默认 `report-only`） |
 | 可选 Guide 层 | `.agents/guides/`（如存在） |
 | 验证证据快照 | `scripts/harness/evidence.sh` / `scripts/harness/evidence.ps1` |
+
+## 渐进式读取
+
+- 默认只读取本文件；根据任务需要再进入下游文档，不预加载整个 `.agents/` 或 `docs/`。
+- 涉及 Harness 状态、Issue、review、验证或交付边界时读取 `docs/harness/control-plane.md`。
+- 复杂任务先读 `.agents/PLANS.md`；真正写计划时再读计划模板，需要校准质量时才读实现示例。
+- 手动逐阶段执行、多任务交接、review、lint 和测试分别读取对应 prompt、guide 或 runbook。
+- `docs/issues/` 只在 `issue-provider=repo` 时读取；skills 只在任务匹配或被显式调用时读取。
 
 ## 真相边界
 
 | 路径 | 负责内容 |
 | --- | --- |
-| `docs/harness/` | 控制面规则、Issue Workflow、Issue Tracker profile 与项目级机械约束登记 |
+| `docs/harness/control-plane.md` | Harness 唯一控制面：主流程、Issue 状态机、review、验证与交付边界 |
 | `docs/issues/` | `issue-provider=repo` 时的仓库 issue 存储 |
 | `.agents/PLANS.md` + `.agents/plans/` | 计划协议、计划主模板和本地计划实例 |
 | `.agents/skills/` | base 默认 repo-local workflow skill：issue goal prompt、计划归档、版本发布边界、测试 runbook 执行与回写 |
@@ -61,8 +67,7 @@
 - `make harness-verify` 只验证 base harness 运行时关键不变量，不替代项目自身 build / test / lint。
 - 成功验证后可执行 `bash scripts/harness/evidence.sh snapshot` 生成只读快照；是否复用必须遵循 `docs/harness/control-plane.md` 的 session、命令顺序、验证类型和 `review_policy` 规则。
 - Bash / Git Bash 命令示例使用 POSIX 路径；PowerShell 命令示例使用 `C:\path\to\repo` 或 UNC 路径，不自动互转
-- `docs/harness/*.md` 默认应提交
-- 初始化后应在 `docs/harness/project-constraints.md` 中登记项目级机械约束；没有可执行命令或 gate 的规则不得标记为 `enforced`
+- `docs/harness/control-plane.md` 默认应提交
 - `.agents/plans/TEMPLATE.md` 默认应提交
 - `.agents/plans/TEMPLATE.md` 与 `.agents/plans/EXAMPLE-implementation.md` 默认提交；其余计划实例和运行态计划文件默认不提交
 - `.agents/skills/*/SKILL.md` 默认应提交；默认技能脚本只做 dry-run 或显式 `--write` 写入，不直接操作外部系统
@@ -71,7 +76,6 @@
 - 若后续补齐 `.agents/prompts/` 和 `.agents/guides/`，默认使用 `full` 模式，且这些文档默认也应提交
 - 若存在 `.agents/prompts/orchestrator-thread.md`，多 thread / worktree / subagent 编排先读它；子 thread 不默认归档，完成后标题加 `【完成】`
 - `.agents/prompts/orchestrator-thread.md` 是 Codex 专用 thread 编排 prompt；非 Codex agent 或人工流程只能按其中的 handoff / Issue comment / `Current State` 约束维护状态机
-- 若存在 `.agents/prompts/maintenance-loop.md`，默认只做 `report-only` 维护扫描；`issue-create / safe-fix / rule-promotion` 必须由用户显式指定
 - 模板配置可提交
 - 若需要环境配置，可按项目约定提交 `.env.example`、`settings.example.yaml` 这类示例文件
 - `docs/test/RUNBOOK_TEMPLATE.md` 默认提交；其余 `docs/test/*` 是本地脱敏 runbook / 结果摘要，默认忽略
@@ -82,7 +86,7 @@
 - `.cursor/` 默认不提交；仅允许显式维护的 `.cursor/rules/*.mdc` 规则文件按 harness contract 跟踪
 - `merge` / `escalation` 仍然是流程阶段，但默认不由 initializer 自带 shell gate 承担
 
-## 项目级工程约束
+## 项目约束
 
 - 本项目是 Go CLI 工具，模块路径固定为 `github.com/SisyphusSQ/mongo-overview-tool/v2`。
 - `go.mod` 当前声明 `go 1.26`，初始化 harness 时不得顺手调整 Go module 版本。

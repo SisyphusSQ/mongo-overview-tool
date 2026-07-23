@@ -38,9 +38,6 @@
 必须先读取：
 - <ABSOLUTE-REPO-PATH>/AGENTS.md
 - <ABSOLUTE-REPO-PATH>/docs/harness/control-plane.md
-- <ABSOLUTE-REPO-PATH>/docs/harness/issue-workflow.md
-- <ABSOLUTE-REPO-PATH>/<ACTIVE-ISSUE-PROFILE-DOC>
-- <ABSOLUTE-REPO-PATH>/docs/harness/project-constraints.md
 - <ABSOLUTE-REPO-PATH>/.agents/PLANS.md
 - <ABSOLUTE-REPO-PATH>/.agents/plans/TEMPLATE.md
 - <ABSOLUTE-REPO-PATH>/.agents/prompts/issue-standard-workflow.md（如存在）
@@ -72,13 +69,11 @@ Harness 要求：
      - 组件职责与代码落点
      - 关键执行时序
      - 停止 / 错误 / 恢复
+   - 关键对象片段（对应 `Reference Snippets`）
    - 具体步骤（对应 `Concrete Steps`）
    - 验证和验收（对应 `Validation and Acceptance`）
-   - Harness 控制面（对应 `Harness Control Plane`）
-   - 验证摘要（对应 `Verify Summary`）
    - 评审摘要（对应 `Review Summary`）
-   - 回写摘要（对应 `Writeback Summary`）
-   - 结果（对应 `Outcomes`）
+   - 结果与复盘（对应 `Outcomes & Retrospective`）
 5. 如果任务信息不足以冻结范围，先停在 plan-only，不开始实现。
 6. 如果发现范围过大、依赖缺失或写入范围失控，先回写阻塞项，不硬做。
 
@@ -118,21 +113,23 @@ Live E2E 要求：
 验证证据与复用：
 - `verification_summary` 记录 `evidence_id`、有序命令和结果、`execution_session_id`、`verification_type`、`verified_at` 与 `repository_path`。
 - `verification_type` 只能是 `deterministic-local`、`environment-dependent` 或 `live`。
-- 仅同一 session、同一快照、同一命令顺序、单仓单写入者、无 integration event 且全部为 deterministic-local 时可以复用。
+- 没有 integration event 时，同一 session、同一快照、同一命令顺序的单仓单写入者 deterministic-local 证据可沿用到 closeout。
 - 多仓、多 lease、strict、环境依赖、live 或不确定情况必须重跑；required live E2E 永不复用。
-- 复用时仍进入 post-integration verify，记录 `post_integration_verify_summary.status=reused` 与 evidence id；否则记录 `status=executed`。
+- 发生 integration event 时必须执行 post-integration verify；不得用集成前证据替代。
 
 任务系统回写：
 完成或阻塞时，给任务 <ISSUE-ID> 追加评论，或写入仓库任务回写日志，至少包含：
 - verification_summary
 - review_summary，其中明确 `review_policy`、`subagent_review_required`、`review_owner` 与 `blocking_findings`
-- integration_summary
-- post_integration_verify_summary
 - writeback_summary
 - live_e2e_status
 - residual_risks
 - recovery_point
 - next_action
+
+条件回写：
+- 发生 integration event 时补 integration_summary、post_integration_verify_summary。
+- 进入可选交付阶段时补 pr_prep_summary、merge_summary。
 
 停止条件：
 - 任务系统 / 仓库真相冲突且无法自行判断

@@ -11,25 +11,6 @@
 - **索引与容量审计 (`index-audit` / `capacity`)**: 给出 MongoDB 3.4–7.x 分片集合索引一致性、通用索引复核候选、脱敏容量快照和纯离线差异，不自动执行索引或存储变更。
 - **批量操作 (`bulk-delete` / `bulk-update`)**: 支持流控的批量删除和更新操作，减少对线上业务的影响。
 
-## Harness 控制面
-
-`make harness-check` / `make harness-verify` 只验证 harness 运行时关键不变量，不替代项目自身 build / test / lint。需要记录验证证据时，在仓库根执行 `bash scripts/harness/evidence.sh snapshot`；PowerShell 使用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\harness\\evidence.ps1 -Action Snapshot`。证据复用条件以 `docs/harness/control-plane.md` 为准。
-
-本仓使用 `docs/harness/` 和 `.agents/` 维护 agent 协作控制面。默认 workflow skill 包括：
-
-- `.agents/skills/issue-goal-prompt/SKILL.md`：从 Linear / repo issue / 设计文档 / runbook 生成执行级 Goal Prompt。
-- `.agents/skills/project-plan-archive/SKILL.md`：归档已完成计划。
-- `.agents/skills/project-version-release/SKILL.md`：维护版本和 release 边界。
-- `.agents/skills/test-runbook/SKILL.md`：生成、执行和回写测试 runbook。
-
-稳定验证入口：
-
-```bash
-make harness-verify
-go test ./...
-make test
-```
-
 ## 安装与构建
 
 ### 源码构建
@@ -212,7 +193,7 @@ go test -tags=integration -count=1 -v \
 
 三个分片环境的 Session 中位耗时均低于 45 秒，且相对 Legacy 的降幅均超过 35%。每次分片 Session 都只加载一次 topology 和一次 shard inventory，派生连接数为 24，远程采集峰值并发为 4。MongoDB 3.4、4.2、7.0 的显式 Session 索引一致性检查也全部通过，分别命中 `direct_list_indexes`、`index_stats`、`check_metadata_consistency` 三条版本策略，结果均为 complete、consistent 且未触发 fallback。
 
-本轮同时验证了 `-t/--target host:port` 在三个分片版本上的连接行为，以及 `--host` 配合 `-P/--port` 的兼容入口。完整测试、race、vet、harness、构建、integration build-only 和 benchmark 均通过；测试过程没有执行 Bulk、数据或索引写入，也没有记录集群地址、业务 namespace 或认证信息。
+本轮同时验证了 `-t/--target host:port` 在三个分片版本上的连接行为，以及 `--host` 配合 `-P/--port` 的兼容入口。完整测试、race、vet、构建、integration build-only 和 benchmark 均通过；测试过程没有执行 Bulk、数据或索引写入，也没有记录集群地址、业务 namespace 或认证信息。
 
 结论：请求级 `CollectorSession` 优化已达到当前 SDK 上线门槛。接入方需要在一次上层请求内创建并复用同一个 session，才能获得上述拓扑、连接和并发调度收益；单能力 `Client` 调用和 CLI 行为继续保持兼容。DBBridge 及其他接入方的适配不包含在当前 SDK 分支中。
 
